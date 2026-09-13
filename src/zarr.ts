@@ -92,7 +92,7 @@ const VARIABLE_PRESENTATION: Record<
   air_temperature_2m: { displayUnits: "°C", palette: "temperature", domain: [-20, 40] },
   cloud_area_fraction: { displayUnits: "%", palette: "cloud", domain: [0, 100] },
   eastward_wind_10m: { displayUnits: "m/s", palette: "wind", domain: [-30, 30] },
-  mean_sea_level_pressure: { displayUnits: "hPa", palette: "pressure", domain: [980, 1040] },
+  mean_sea_level_pressure: { displayUnits: "hPa", palette: "pressure", domain: [990, 1020] },
   northward_wind_10m: { displayUnits: "m/s", palette: "wind", domain: [-30, 30] },
   precipitation_amount: { displayUnits: "mm", palette: "precipitation", domain: [0, 50] },
   relative_humidity_2m: { displayUnits: "%", palette: "humidity", domain: [0, 100] },

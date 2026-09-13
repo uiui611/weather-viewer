@@ -63,7 +63,10 @@ const PALETTES: Record<string, Array<[number, string]>> = {
   humidity: [[0, "#f7f4e8"], [0.28, "#c5dec3"], [0.55, "#71b49a"], [0.78, "#287b79"], [1, "#123f58"]],
   cloud: [[0, "#f7f4e8"], [0.3, "#cdd4d1"], [0.6, "#8d9ca0"], [1, "#39494f"]],
   wind: [[0, "#443983"], [0.25, "#3288bd"], [0.5, "#f3f0d1"], [0.75, "#e98b42"], [1, "#b62f3b"]],
-  pressure: [[0, "#4c2f7e"], [0.25, "#476fb0"], [0.5, "#b8d5c8"], [0.75, "#edc675"], [1, "#b54a47"]],
+  pressure: [
+    [0, "#180026"], [0.18, "#253aa8"], [0.42, "#70cbea"], [0.49, "#edf8f5"],
+    [0.51, "#fff1a3"], [0.58, "#f29a32"], [0.82, "#d32626"], [1, "#3a0000"],
+  ],
   precipitation: [[0, "#edf7e9"], [0.15, "#9adbb4"], [0.35, "#38a6a5"], [0.6, "#2765ad"], [0.8, "#603c9b"], [1, "#ba2f7b"]],
 };
 
@@ -117,6 +120,10 @@ function interpolateColor(paletteName: string, normalized: number): string {
 function normalize(value: number, variable: VariableInfo): number {
   const [min, max] = variable.domain;
   const linear = (value - min) / (max - min);
+  if (variable.palette === "pressure") {
+    const centered = linear - 0.5;
+    return 0.5 + Math.sign(centered) * Math.pow(Math.abs(centered) * 2, 0.55) / 2;
+  }
   return variable.palette === "precipitation" ? Math.sqrt(Math.max(0, linear)) : linear;
 }
 
