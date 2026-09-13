@@ -39,6 +39,7 @@ export interface VariableInfo {
 export interface DatasetInfo {
   id: string;
   root: string;
+  collection: string;
   cycle: string;
   title: string;
   source: string;
@@ -66,7 +67,10 @@ export interface GridResponse {
 }
 
 const BUCKET = process.env.S3_BUCKET ?? "weather";
-const PREFIX = (process.env.S3_PREFIX ?? "noaa-gfs").replace(/^\/+|\/+$/g, "");
+const PREFIXES = (process.env.S3_PREFIXES ?? process.env.S3_PREFIX ?? "noaa-gfs,forecast")
+  .split(",")
+  .map((prefix) => prefix.replace(/^\/+|\/+$/g, "").trim())
+  .filter((prefix, index, prefixes) => prefix && prefixes.indexOf(prefix) === index);
 const ENDPOINT = process.env.S3_ENDPOINT_URL ?? "http://rustfs.default.svc.cluster.local:9000";
 const REGION = process.env.AWS_REGION ?? "us-east-1";
 const JAPAN_BOUNDS = { south: 20, west: 118, north: 50, east: 155 };
@@ -182,14 +186,16 @@ function transformValue(variable: string, value: number): number {
 
 async function listObjects(): Promise<_Object[]> {
   const objects: _Object[] = [];
-  let ContinuationToken: string | undefined;
-  do {
-    const result = await s3.send(
-      new ListObjectsV2Command({ Bucket: BUCKET, Prefix: `${PREFIX}/`, ContinuationToken }),
-    );
-    objects.push(...(result.Contents ?? []));
-    ContinuationToken = result.NextContinuationToken;
-  } while (ContinuationToken);
+  for (const prefix of PREFIXES) {
+    let ContinuationToken: string | undefined;
+    do {
+      const result = await s3.send(
+        new ListObjectsV2Command({ Bucket: BUCKET, Prefix: `${prefix}/`, ContinuationToken }),
+      );
+      objects.push(...(result.Contents ?? []));
+      ContinuationToken = result.NextContinuationToken;
+    } while (ContinuationToken);
+  }
   return objects;
 }
 
@@ -221,7 +227,8 @@ export async function getCatalog(force = false): Promise<DatasetInfo[]> {
       return {
         id: root,
         root,
-        cycle: asString(groupAttrs.cycle),
+        collection: PREFIXES.find((prefix) => root === prefix || root.startsWith(`${prefix}/`)) ?? "",
+        cycle: asString(groupAttrs.cycle, asString(groupAttrs.forecast_reference_time)),
         title: asString(groupAttrs.title, "NOAA NCEP GFS"),
         source: asString(groupAttrs.source),
         bytes: rootObjects.reduce((sum, object) => sum + (object.Size ?? 0), 0),
@@ -245,7 +252,9 @@ export async function getCatalog(force = false): Promise<DatasetInfo[]> {
       };
     }),
   );
-  datasets.sort((a, b) => b.cycle.localeCompare(a.cycle));
+  datasets.sort((a, b) =>
+    a.collection.localeCompare(b.collection) || b.cycle.localeCompare(a.cycle),
+  );
   catalogCache = { expires: Date.now() + 60_000, datasets };
   return datasets;
 }
@@ -334,6 +343,6 @@ export async function getGrid(
 
 export const storageConfig = {
   bucket: BUCKET,
-  prefix: PREFIX,
+  prefixes: PREFIXES,
   bounds: JAPAN_BOUNDS,
 };

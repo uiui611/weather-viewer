@@ -4,7 +4,7 @@
 #   GFS の経緯度格子はブラウザ上で Web Mercator へ投影して描画します。
 #
 # 構成:
-#   - ConfigMap `weather-zarr-viewer`: RustFS 接続先、バケット、プレフィックス、URL prefix
+#   - ConfigMap `weather-zarr-viewer`: RustFS 接続先、バケット、複数プレフィックス、URL prefix
 #   - Deployment `weather-zarr-viewer`: 読み取り専用 API と Web UI（3 replicas）
 #   - Service `weather-zarr-viewer`: NodePort 30810
 #
@@ -33,7 +33,7 @@ data:
   S3_ENDPOINT_URL: http://rustfs.default.svc.cluster.local:9000
   AWS_REGION: us-east-1
   S3_BUCKET: weather
-  S3_PREFIX: noaa-gfs
+  S3_PREFIXES: noaa-gfs,forecast
 ---
 apiVersion: apps/v1
 kind: Deployment

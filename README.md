@@ -1,6 +1,7 @@
 # GPV Weather Atlas
 
-RustFS の `weather/noaa-gfs/YYYYMMDDHH.zarr` に保存された NOAA/NCEP GFS 0.25° Zarr v2 を、
+RustFS の `weather/noaa-gfs/YYYYMMDDHH.zarr` と `weather/forecast/YYYYMMDDHH.zarr` に
+保存された NOAA/NCEP GFS 0.25° Zarr v2 を、
 日本周辺の国土地理院地図上に表示する Bun + TypeScript アプリです。
 
 ## 表示方法と投影
@@ -22,7 +23,7 @@ Leaflet の地図座標へ変換してから Canvas に描画します。表示�
 bun install --frozen-lockfile
 S3_ENDPOINT_URL=http://127.0.0.1:19000 \
 S3_BUCKET=weather \
-S3_PREFIX=noaa-gfs \
+S3_PREFIXES=noaa-gfs,forecast \
 AWS_REGION=us-east-1 \
 AWS_ACCESS_KEY_ID=... \
 AWS_SECRET_ACCESS_KEY=... \
@@ -57,7 +58,7 @@ location /weather-viewer/ {
 
 ## API
 
-- `GET /weather-viewer/api/catalog`: `_SUCCESS` がある Zarr と変数・予報時刻を列挙
+- `GET /weather-viewer/api/catalog`: 設定した各系列から `_SUCCESS` がある Zarr と変数・予報時刻を列挙
 - `GET /weather-viewer/api/grid`: 指定した変数・時刻の日本周辺格子を返却
 - `GET /weather-viewer/healthz`: プロセスのヘルスチェック
 

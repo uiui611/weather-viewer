@@ -17,6 +17,7 @@ interface VariableInfo {
 interface DatasetInfo {
   id: string;
   root: string;
+  collection: string;
   cycle: string;
   title: string;
   source: string;
@@ -44,6 +45,7 @@ const $ = <T extends HTMLElement>(selector: string): T => {
   return element;
 };
 
+const collectionSelect = $<HTMLSelectElement>("#collection-select");
 const datasetSelect = $<HTMLSelectElement>("#dataset-select");
 const variableSelect = $<HTMLSelectElement>("#variable-select");
 const timeRange = $<HTMLInputElement>("#time-range");
@@ -229,6 +231,25 @@ function selectedDataset(): DatasetInfo {
   return dataset;
 }
 
+function populateDatasets(): void {
+  const previousCycle = datasets.find((entry) => entry.id === datasetSelect.value)?.cycle;
+  const collectionDatasets = datasets.filter(
+    (dataset) => dataset.collection === collectionSelect.value,
+  );
+  datasetSelect.replaceChildren(
+    ...collectionDatasets.map(
+      (dataset) =>
+        new Option(
+          `${formatCycle(dataset.cycle)} · ${(dataset.bytes / 1_000_000).toFixed(1)} MB`,
+          dataset.id,
+        ),
+    ),
+  );
+  const matchingCycle = collectionDatasets.find((dataset) => dataset.cycle === previousCycle);
+  if (matchingCycle) datasetSelect.value = matchingCycle.id;
+  datasetSelect.disabled = collectionDatasets.length === 0;
+}
+
 function populateVariables(): void {
   const dataset = selectedDataset();
   const previous = variableSelect.value;
@@ -305,11 +326,13 @@ async function initialize(): Promise<void> {
     if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
     datasets = payload.datasets as DatasetInfo[];
     if (!datasets.length) throw new Error("表示できる Zarr データがありません");
-    datasetSelect.replaceChildren(
-      ...datasets.map((dataset) => new Option(`${formatCycle(dataset.cycle)} · ${(dataset.bytes / 1_000_000).toFixed(1)} MB`, dataset.id)),
+    const collections = [...new Set(datasets.map((dataset) => dataset.collection))];
+    collectionSelect.replaceChildren(
+      ...collections.map((collection) => new Option(collection, collection)),
     );
-    datasetSelect.disabled = false;
-    $("#connection-label").textContent = `RustFS · ${datasets.length} cycles`;
+    collectionSelect.disabled = false;
+    populateDatasets();
+    $("#connection-label").textContent = `RustFS · ${collections.length} 系列 · ${datasets.length} cycles`;
     populateVariables();
     await loadGrid();
   } catch (error) {
@@ -320,6 +343,11 @@ async function initialize(): Promise<void> {
   }
 }
 
+collectionSelect.addEventListener("change", () => {
+  populateDatasets();
+  populateVariables();
+  void loadGrid();
+});
 datasetSelect.addEventListener("change", () => {
   populateVariables();
   void loadGrid();

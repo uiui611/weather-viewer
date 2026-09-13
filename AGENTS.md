@@ -30,10 +30,11 @@ RustFS の `weather` バケットに保存された NOAA/NCEP GFS 0.25° Zarr v2
 
 ## RustFS のデータ契約
 
-保存先は次の形式です。
+保存先は次の形式です。系列は今後追加される可能性があります。
 
 ```text
 s3://weather/noaa-gfs/YYYYMMDDHH.zarr/
+s3://weather/forecast/YYYYMMDDHH.zarr/
 ```
 
 例:
@@ -44,7 +45,7 @@ noaa-gfs/2026091212.zarr/.zmetadata
 noaa-gfs/2026091212.zarr/_SUCCESS
 ```
 
-アプリは `S3_PREFIX` 以下を列挙し、`.zgroup` と `_SUCCESS` の両方が存在するZarrだけを
+アプリは `S3_PREFIXES` にカンマ区切りで指定した各系列を列挙し、`.zgroup` と `_SUCCESS` の両方が存在するZarrだけを
 カタログへ掲載します。パスの階層数やZarr名そのものには依存しません。
 
 2026-09-13の確認時点では、各サイクルは次の構造でした。
@@ -56,7 +57,7 @@ noaa-gfs/2026091212.zarr/_SUCCESS
 - 気象配列: float32、chunk `(1, 361, 720)`、Blosc + Zstandard
 - consolidated metadata: `.zmetadata`
 
-既定設定は `S3_BUCKET=weather`、`S3_PREFIX=noaa-gfs` です。旧形式の
+既定設定は `S3_BUCKET=weather`、`S3_PREFIXES=noaa-gfs,forecast` です。旧形式の
 `weather/noaa/gfs/...` へ戻さないでください。
 
 ## 投影と描画に関する重要事項
