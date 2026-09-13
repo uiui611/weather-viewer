@@ -81,6 +81,7 @@ select:focus-visible, button:focus-visible, input:focus-visible { outline: 2px s
 .time-control button:disabled { opacity: .3; cursor: default; }
 input[type="range"] { width: 100%; accent-color: #bd543a; cursor: pointer; }
 #valid-time { margin-top: -8px; font: 500 11px "DM Mono", monospace; color: #697c77; text-align: center; }
+.keyboard-hint { margin: -8px 0 0; font: 500 9px "DM Mono", monospace; color: #87938f; text-align: center; }
 
 .legend-header { display: flex; justify-content: space-between; align-items: start; gap: 15px; }
 .legend-header p { margin: 0 0 4px; font-size: 14px; font-weight: 700; }

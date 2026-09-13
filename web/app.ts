@@ -76,6 +76,7 @@ const map = L.map("map", {
   zoom: 5,
   minZoom: 5,
   maxZoom: 10,
+  keyboard: false,
   zoomControl: false,
   attributionControl: false,
   preferCanvas: true,
@@ -277,6 +278,26 @@ function updateTimeLabels(): void {
   timeNext.disabled = index >= dataset.times.length - 1;
 }
 
+function stepForecastTime(offset: number): void {
+  const current = Number(timeRange.value);
+  const next = Math.min(Number(timeRange.max), Math.max(0, current + offset));
+  if (next === current) return;
+  timeRange.value = String(next);
+  void loadGrid();
+}
+
+function stepModelCycle(offset: number): void {
+  const collectionDatasets = datasets.filter(
+    (dataset) => dataset.collection === collectionSelect.value,
+  );
+  const current = collectionDatasets.findIndex((dataset) => dataset.id === datasetSelect.value);
+  const next = Math.min(collectionDatasets.length - 1, Math.max(0, current + offset));
+  if (current < 0 || next === current) return;
+  datasetSelect.value = collectionDatasets[next]!.id;
+  populateVariables();
+  void loadGrid();
+}
+
 function updateLegend(variable: VariableInfo): void {
   $("#variable-label").textContent = variable.label;
   $("#variable-level").textContent = `${variable.level} · ${variable.statistic}`;
@@ -355,13 +376,24 @@ datasetSelect.addEventListener("change", () => {
 variableSelect.addEventListener("change", () => void loadGrid());
 timeRange.addEventListener("input", updateTimeLabels);
 timeRange.addEventListener("change", () => void loadGrid());
-timePrev.addEventListener("click", () => {
-  timeRange.value = String(Math.max(0, Number(timeRange.value) - 1));
-  void loadGrid();
-});
-timeNext.addEventListener("click", () => {
-  timeRange.value = String(Math.min(Number(timeRange.max), Number(timeRange.value) + 1));
-  void loadGrid();
+timePrev.addEventListener("click", () => stepForecastTime(-1));
+timeNext.addEventListener("click", () => stepForecastTime(1));
+
+document.addEventListener("keydown", (event) => {
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+    return;
+  }
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+  const offsets: Partial<Record<string, () => void>> = {
+    ArrowLeft: () => stepForecastTime(-1),
+    ArrowRight: () => stepForecastTime(1),
+    ArrowUp: () => stepModelCycle(-1),
+    ArrowDown: () => stepModelCycle(1),
+  };
+  const action = offsets[event.key];
+  if (!action) return;
+  event.preventDefault();
+  action();
 });
 
 map.on("mousemove", (event: LeafletMouseEvent) => {
