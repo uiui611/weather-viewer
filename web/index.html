@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#102a2b" />
+  <meta name="description" content="RustFS に保存された NOAA GFS Zarr データを、国土地理院地図上で日本域表示する気象データビューア" />
+  <meta property="og:title" content="GPV Weather Atlas" />
+  <meta property="og:description" content="NOAA GFS の気象格子データを、日本域の地図上で探索するビューア" />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="./og.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="GPV Weather Atlas" />
+  <meta name="twitter:description" content="NOAA GFS の気象格子データを、日本域の地図上で探索するビューア" />
+  <meta name="twitter:image" content="./og.png" />
+  <title>GPV Weather Atlas</title>
+  <script type="module" src="./app.ts"></script>
+</head>
+
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="brand-copy">
+        <p>RUSTFS · ZARR EXPLORER</p>
+        <h1>GPV Weather Atlas</h1>
+      </div>
+      <div class="topbar-meta">
+        <span class="live-dot"></span>
+        <span id="connection-label">RustFS を確認中</span>
+      </div>
+    </header>
+
+    <aside class="control-panel" aria-label="表示データ設定">
+      <section class="panel-section panel-intro">
+        <p class="eyebrow">JAPAN DOMAIN</p>
+        <h2>気象の層を選ぶ</h2>
+        <p>全球 GFS 0.25° 格子から、日本周辺だけを読み出して表示します。</p>
+      </section>
+
+      <section class="panel-section controls">
+        <label class="field">
+          <span>解析サイクル</span>
+          <select id="dataset-select" disabled>
+            <option>読み込み中…</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>気象要素</span>
+          <select id="variable-select" disabled>
+            <option>—</option>
+          </select>
+        </label>
+
+        <div class="time-heading">
+          <span>予報時刻</span>
+          <output id="forecast-hour">—</output>
+        </div>
+        <div class="time-control">
+          <button id="time-prev" type="button" aria-label="前の予報時刻" disabled>−</button>
+          <input id="time-range" type="range" min="0" max="0" value="0" disabled />
+          <button id="time-next" type="button" aria-label="次の予報時刻" disabled>＋</button>
+        </div>
+        <time id="valid-time">有効時刻 —</time>
+      </section>
+
+      <section class="panel-section legend-section" aria-label="凡例">
+        <div class="legend-header">
+          <div>
+            <p id="variable-label">データを準備中</p>
+            <span id="variable-level">—</span>
+          </div>
+          <strong id="legend-unit">—</strong>
+        </div>
+        <div id="legend-gradient" class="legend-gradient"></div>
+        <div class="legend-range"><span id="legend-min">—</span><span id="legend-max">—</span></div>
+      </section>
+
+      <section class="panel-section reading-section" aria-live="polite">
+        <div class="reading-coordinate"><span class="crosshair">＋</span><span id="cursor-position">地図上にカーソルを移動</span>
+        </div>
+        <div class="reading-value"><strong id="cursor-value">—</strong><span id="cursor-unit"></span></div>
+      </section>
+
+      <section class="panel-section projection-note">
+        <p class="eyebrow">PROJECTION NOTE</p>
+        <p>経緯度格子の各セル頂点を、表示時に Web Mercator へ投影しています。</p>
+      </section>
+    </aside>
+
+    <section class="map-stage" aria-label="日本周辺の気象地図">
+      <div id="map"></div>
+      <div id="loading" class="loading-card" role="status">
+        <span class="loader"></span>
+        <div><strong>気象格子を展開中</strong><small>RustFS / Zarr</small></div>
+      </div>
+      <div id="error" class="error-card" hidden></div>
+      <div class="map-caption">
+        <span>20–50°N</span><span>118–155°E</span><span>GFS 0.25°</span>
+      </div>
+    </section>
+
+    <footer class="source-bar">
+      <span>気象データ: NOAA/NCEP GFS</span>
+      <span class="source-divider">/</span>
+      <a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noreferrer">
+        背景地図: 地理院タイル（国土地理院）
+      </a>
+      <span class="source-detail">小縮尺海域: GEBCO / 海上保安庁許可第292502号（水路業務法第25条に基づく類似刊行物） · 海岸線: NIMA VMAP0</span>
+    </footer>
+  </main>
+</body>
+
+</html>

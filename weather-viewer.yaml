@@ -1,0 +1,137 @@
+# 概要:
+#   RustFS の `weather/noaa-gfs/YYYYMMDDHH.zarr` にある Zarr v2 の NOAA GFS データを読み取り、
+#   日本周辺を国土地理院の地理院タイル上に表示する Bun/TypeScript Web アプリです。
+#   GFS の経緯度格子はブラウザ上で Web Mercator へ投影して描画します。
+#
+# 構成:
+#   - ConfigMap `weather-zarr-viewer`: RustFS 接続先、バケット、プレフィックス、URL prefix
+#   - Deployment `weather-zarr-viewer`: 読み取り専用 API と Web UI（3 replicas）
+#   - Service `weather-zarr-viewer`: NodePort 30810
+#
+# 前提条件:
+#   - 対象 Namespace は `default` です。
+#   - Secret `rustfs-credentials` に `RUSTFS_ACCESS_KEY` と `RUSTFS_SECRET_KEY` が必要です。
+#   - イメージ `ubuntu.home.arpa/weather-zarr-viewer:0.1.1` を build/push してください。
+#   - Pod から `rustfs.default.svc.cluster.local:9000` へ到達できる必要があります。
+#   - 利用者のブラウザから `cyberjapandata.gsi.go.jp` へ HTTPS 接続できる必要があります。
+#
+# 適用後の確認:
+#   kubectl rollout status deployment/weather-zarr-viewer -n default
+#   curl http://<worker-ip>:30810/weather-viewer/healthz
+#
+# 注意事項:
+#   - RustFS の認証情報はブラウザへ渡さず、サーバー側だけで使用します。
+#   - 外部 Nginx で公開する場合は `/weather-viewer/` prefix を upstream へ保持してください。
+#   - 背景地図には常時、国土地理院および小縮尺タイルの出典を表示します。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: weather-zarr-viewer
+  namespace: default
+data:
+  APP_BASE_PATH: /weather-viewer
+  S3_ENDPOINT_URL: http://rustfs.default.svc.cluster.local:9000
+  AWS_REGION: us-east-1
+  S3_BUCKET: weather
+  S3_PREFIX: noaa-gfs
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather-zarr-viewer
+  namespace: default
+  labels:
+    app.kubernetes.io/name: weather-zarr-viewer
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: weather-zarr-viewer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: weather-zarr-viewer
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: viewer
+          image: ubuntu.home.arpa/weather-zarr-viewer:0.1.1
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          envFrom:
+            - configMapRef:
+                name: weather-zarr-viewer
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: rustfs-credentials
+                  key: RUSTFS_ACCESS_KEY
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: rustfs-credentials
+                  key: RUSTFS_SECRET_KEY
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /weather-viewer/healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /weather-viewer/healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-zarr-viewer
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: weather-zarr-viewer
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      nodePort: 30810
+      protocol: TCP
