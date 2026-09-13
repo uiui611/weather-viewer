@@ -11,17 +11,17 @@
 # 前提条件:
 #   - 対象 Namespace は `default` です。
 #   - Secret `rustfs-credentials` に `RUSTFS_ACCESS_KEY` と `RUSTFS_SECRET_KEY` が必要です。
-#   - イメージ `ubuntu.home.arpa/weather-zarr-viewer:0.1.3` を build/push してください。
+#   - イメージ `ubuntu.home.arpa/weather-zarr-viewer:0.1.4` を build/push してください。
 #   - Pod から `rustfs.default.svc.cluster.local:9000` へ到達できる必要があります。
 #   - 利用者のブラウザから `cyberjapandata.gsi.go.jp` へ HTTPS 接続できる必要があります。
 #
 # 適用後の確認:
 #   kubectl rollout status deployment/weather-zarr-viewer -n default
-#   curl http://<worker-ip>:30810/weather-view/healthz
+#   curl http://<worker-ip>:30810/weather-viewer/healthz
 #
 # 注意事項:
 #   - RustFS の認証情報はブラウザへ渡さず、サーバー側だけで使用します。
-#   - 外部 Nginx で公開する場合は `/weather-view/` prefix を upstream へ保持してください。
+#   - 外部 Nginx で公開する場合は `/weather-viewer/` prefix を upstream へ保持してください。
 #   - 背景地図には常時、国土地理院および小縮尺タイルの出典を表示します。
 apiVersion: v1
 kind: ConfigMap
@@ -29,7 +29,7 @@ metadata:
   name: weather-zarr-viewer
   namespace: default
 data:
-  APP_BASE_PATH: /weather-view
+  APP_BASE_PATH: /weather-viewer
   S3_ENDPOINT_URL: http://rustfs.default.svc.cluster.local:9000
   AWS_REGION: us-east-1
   S3_BUCKET: weather
@@ -63,7 +63,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: viewer
-          image: ubuntu.home.arpa/weather-zarr-viewer:0.1.3
+          image: ubuntu.home.arpa/weather-zarr-viewer:0.1.4
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -93,14 +93,14 @@ spec:
               protocol: TCP
           readinessProbe:
             httpGet:
-              path: /weather-view/healthz
+              path: /weather-viewer/healthz
               port: http
             initialDelaySeconds: 3
             periodSeconds: 5
             timeoutSeconds: 3
           livenessProbe:
             httpGet:
-              path: /weather-view/healthz
+              path: /weather-viewer/healthz
               port: http
             initialDelaySeconds: 10
             periodSeconds: 10

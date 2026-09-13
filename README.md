@@ -37,8 +37,8 @@ AWS_SECRET_ACCESS_KEY=... \
 bun run dev
 ```
 
-インデックスは `http://localhost:3000/weather-view`、気象地図は
-`http://localhost:3000/weather-view/map`、ヘルスチェックは `/weather-view/healthz` です。
+インデックスは `http://localhost:3000/weather-viewer`、気象地図は
+`http://localhost:3000/weather-viewer/map`、ヘルスチェックは `/weather-viewer/healthz` です。
 
 気象地図の選択状態は `collection`（データ系列）と `variable`（気象要素）の
 クエリパラメータへ反映されるため、そのまま共有用リンクとして利用できます。
@@ -46,8 +46,8 @@ bun run dev
 ## コンテナと Kubernetes
 
 ```sh
-docker build -t ubuntu.home.arpa/weather-zarr-viewer:0.1.3 .
-docker push ubuntu.home.arpa/weather-zarr-viewer:0.1.3
+docker build -t ubuntu.home.arpa/weather-zarr-viewer:0.1.4 .
+docker push ubuntu.home.arpa/weather-zarr-viewer:0.1.4
 kubectl apply --dry-run=client -f weather-viewer.yaml
 kubectl apply -f weather-viewer.yaml
 ```
@@ -61,15 +61,15 @@ upstream weather_zarr_viewer {
     server 192.168.101.13:30810;
 }
 
-location /weather-view/ {
+location /weather-viewer/ {
     proxy_pass http://weather_zarr_viewer;
 }
 ```
 
 ## API
 
-- `GET /weather-view/api/catalog`: 設定した各系列から `_SUCCESS` がある Zarr と変数・予報時刻を列挙
-- `GET /weather-view/api/grid`: 指定した変数・時刻の日本周辺格子を返却
-- `GET /weather-view/healthz`: プロセスのヘルスチェック
+- `GET /weather-viewer/api/catalog`: 設定した各系列から `_SUCCESS` がある Zarr と変数・予報時刻を列挙
+- `GET /weather-viewer/api/grid`: 指定した変数・時刻の日本周辺格子を返却
+- `GET /weather-viewer/healthz`: プロセスのヘルスチェック
 
 RustFS のアクセスキーはサーバー内だけで使用され、API やブラウザには返しません。

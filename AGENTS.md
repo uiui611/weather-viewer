@@ -98,7 +98,7 @@ Secretやアクセスキーをリポジトリへ保存しないでください�
 bun install --frozen-lockfile
 bun run check
 bun run build
-docker build -t weather-zarr-viewer:0.1.3 .
+docker build -t weather-zarr-viewer:0.1.4 .
 kubectl create --dry-run=client --validate=false -f weather-viewer.yaml -o name
 kubectl apply --dry-run=server -f weather-viewer.yaml
 ```
@@ -113,10 +113,10 @@ kubectl port-forward -n default service/rustfs 19000:9000
 `bun run dev`を起動してください。既定URLは次の通りです。
 
 ```text
-http://localhost:3000/weather-view
-http://localhost:3000/weather-view/map
-http://localhost:3000/weather-view/healthz
-http://localhost:3000/weather-view/api/catalog
+http://localhost:3000/weather-viewer
+http://localhost:3000/weather-viewer/map
+http://localhost:3000/weather-viewer/healthz
+http://localhost:3000/weather-viewer/api/catalog
 ```
 
 最低限、カタログに `noaa-gfs/YYYYMMDDHH.zarr` が現れることと、最新サイクルの
@@ -124,11 +124,11 @@ http://localhost:3000/weather-view/api/catalog
 
 ## ビルドとデプロイ
 
-現在のアプリ/イメージタグは `0.1.3` です。
+現在のアプリ/イメージタグは `0.1.4` です。
 
 ```sh
-docker build -t ubuntu.home.arpa/weather-zarr-viewer:0.1.3 .
-docker push ubuntu.home.arpa/weather-zarr-viewer:0.1.3
+docker build -t ubuntu.home.arpa/weather-zarr-viewer:0.1.4 .
+docker push ubuntu.home.arpa/weather-zarr-viewer:0.1.4
 kubectl apply -f weather-viewer.yaml
 kubectl rollout status deployment/weather-zarr-viewer -n default --timeout=180s
 ```
@@ -139,7 +139,7 @@ kubectl rollout status deployment/weather-zarr-viewer -n default --timeout=180s
 - replicas: 3
 - Service: `weather-zarr-viewer`
 - NodePort: `30810`
-- URL prefix: `/weather-view`
+- URL prefix: `/weather-viewer`
 - RustFS endpoint: `http://rustfs.default.svc.cluster.local:9000`
 
 2026-09-13に `ubuntu.home.arpa/weather-zarr-viewer:0.1.1` をpushし、digest
@@ -157,18 +157,23 @@ Ready、再起動0、worker1～3への配置を確認しました。サービス
 Ready、再起動0、worker1～3への配置を確認しました。`/weather-view` のインデックス、
 `/weather-view/map`、ヘルスチェック、両系列のカタログ応答もサービス経由で確認済みです。
 
+同日にベースパスを修正した `0.1.4` をpushし、digest
+`sha256:994fe1d96b3b6db3b53114f8d08f2c27f6af121015a49b27c9057a688e7e4e60` で3 Podの
+Ready、再起動0、worker1～3への配置を確認しました。`/weather-viewer` のインデックス、
+`/weather-viewer/map`、ヘルスチェック、両系列のカタログ応答もサービス経由で確認済みです。
+
 同じタグを上書きする場合、既存Podは自動で新しい内容を取得しません。
 タグ上書き後は `kubectl rollout restart` を行うか、マニフェストのイメージタグを更新してください。
 再現性が必要な変更では、新しい固定タグまたはdigest指定を推奨します。
 
 ## 外部公開
 
-前段Nginxの `/weather-view/` locationは、このリポジトリでは管理していません。
+前段Nginxの `/weather-viewer/` locationは、このリポジトリでは管理していません。
 NodePortまでは稼働確認済みですが、Nginx経由の公開URLが必要な場合はubuntuサーバー上の
 `/home/mizu/containers` リポジトリを別途変更します。その作業前に同リポジトリの
 `AGENTS.md`を最後まで読み、既存変更を保持してください。
 
-Nginxの `proxy_pass` は末尾に `/` を付けず、`/weather-view/` prefixをupstreamへ
+Nginxの `proxy_pass` は末尾に `/` を付けず、`/weather-viewer/` prefixをupstreamへ
 保持する必要があります。
 
 ## 既知の制約

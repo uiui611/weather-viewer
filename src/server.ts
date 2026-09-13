@@ -3,7 +3,7 @@ import mapPage from "../web/map.html";
 import { getCatalog, getGrid, storageConfig } from "./zarr";
 
 const port = Number(process.env.PORT ?? 3000);
-const configuredBase = process.env.APP_BASE_PATH ?? "/weather-view";
+const configuredBase = process.env.APP_BASE_PATH ?? "/weather-viewer";
 const base = `/${configuredBase.replace(/^\/+|\/+$/g, "")}`;
 
 function json(data: unknown, status = 200): Response {
