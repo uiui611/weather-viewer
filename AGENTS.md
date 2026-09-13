@@ -98,7 +98,7 @@ Secretやアクセスキーをリポジトリへ保存しないでください�
 bun install --frozen-lockfile
 bun run check
 bun run build
-docker build -t weather-zarr-viewer:0.1.2 .
+docker build -t weather-zarr-viewer:0.1.3 .
 kubectl create --dry-run=client --validate=false -f weather-viewer.yaml -o name
 kubectl apply --dry-run=server -f weather-viewer.yaml
 ```
@@ -124,11 +124,11 @@ http://localhost:3000/weather-view/api/catalog
 
 ## ビルドとデプロイ
 
-現在のアプリ/イメージタグは `0.1.2` です。
+現在のアプリ/イメージタグは `0.1.3` です。
 
 ```sh
-docker build -t ubuntu.home.arpa/weather-zarr-viewer:0.1.2 .
-docker push ubuntu.home.arpa/weather-zarr-viewer:0.1.2
+docker build -t ubuntu.home.arpa/weather-zarr-viewer:0.1.3 .
+docker push ubuntu.home.arpa/weather-zarr-viewer:0.1.3
 kubectl apply -f weather-viewer.yaml
 kubectl rollout status deployment/weather-zarr-viewer -n default --timeout=180s
 ```
@@ -151,6 +151,11 @@ NodePortの `/weather-viewer/healthz` へ到達できています。
 `sha256:015643ad8c0ed09ffef5a24137b0e0780cf2f993c2495a37e1833ee9a70c0b1a` で3 Podの
 Ready、再起動0、worker1～3への配置を確認しました。サービス経由のヘルスチェックと、
 `forecast` / `noaa-gfs` 両系列および気圧レンジ 990～1020 hPa のカタログ応答も確認済みです。
+
+同日に `0.1.3` をpushし、digest
+`sha256:cffad4608dbb40f4da8ab8038d849260f0c006c9cc0a0ad3b3d15c6494f80720` で3 Podの
+Ready、再起動0、worker1～3への配置を確認しました。`/weather-view` のインデックス、
+`/weather-view/map`、ヘルスチェック、両系列のカタログ応答もサービス経由で確認済みです。
 
 同じタグを上書きする場合、既存Podは自動で新しい内容を取得しません。
 タグ上書き後は `kubectl rollout restart` を行うか、マニフェストのイメージタグを更新してください。

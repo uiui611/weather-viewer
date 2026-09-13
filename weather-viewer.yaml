@@ -11,7 +11,7 @@
 # 前提条件:
 #   - 対象 Namespace は `default` です。
 #   - Secret `rustfs-credentials` に `RUSTFS_ACCESS_KEY` と `RUSTFS_SECRET_KEY` が必要です。
-#   - イメージ `ubuntu.home.arpa/weather-zarr-viewer:0.1.2` を build/push してください。
+#   - イメージ `ubuntu.home.arpa/weather-zarr-viewer:0.1.3` を build/push してください。
 #   - Pod から `rustfs.default.svc.cluster.local:9000` へ到達できる必要があります。
 #   - 利用者のブラウザから `cyberjapandata.gsi.go.jp` へ HTTPS 接続できる必要があります。
 #
@@ -63,7 +63,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: viewer
-          image: ubuntu.home.arpa/weather-zarr-viewer:0.1.2
+          image: ubuntu.home.arpa/weather-zarr-viewer:0.1.3
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
