@@ -54,6 +54,7 @@ const timeNext = $<HTMLButtonElement>("#time-next");
 const loading = $("#loading");
 const errorCard = $("#error");
 const basePath = window.location.pathname.replace(/\/map\/?$/, "");
+const VARIABLE_SHORTCUT_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 const PALETTES: Record<string, Array<[number, string]>> = {
   temperature: [
@@ -261,7 +262,11 @@ function populateDatasets(): void {
 function populateVariables(preferred = variableSelect.value): void {
   const dataset = selectedDataset();
   variableSelect.replaceChildren(
-    ...dataset.variables.map((variable) => new Option(variable.label, variable.id)),
+    ...dataset.variables.map((variable, index) => {
+      const shortcut = VARIABLE_SHORTCUT_KEYS[index];
+      const label = shortcut ? `${variable.label}（Alt+${shortcut}）` : variable.label;
+      return new Option(label, variable.id);
+    }),
   );
   if (dataset.variables.some((variable) => variable.id === preferred)) {
     variableSelect.value = preferred;
@@ -284,6 +289,16 @@ function selectionUrl(): URL {
 
 function replaceSelectionUrl(): void {
   window.location.replace(selectionUrl());
+}
+
+function selectVariableByShortcut(key: string): boolean {
+  const index = VARIABLE_SHORTCUT_KEYS.indexOf(key);
+  if (index < 0 || variableSelect.disabled) return false;
+  const variable = selectedDataset().variables[index];
+  if (!variable) return false;
+  variableSelect.value = variable.id;
+  replaceSelectionUrl();
+  return true;
 }
 
 function updateTimeLabels(): void {
@@ -406,7 +421,11 @@ timePrev.addEventListener("click", () => stepForecastTime(-1));
 timeNext.addEventListener("click", () => stepForecastTime(1));
 
 document.addEventListener("keydown", (event) => {
-  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+  if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.shiftKey) {
+    return;
+  }
+  if (event.altKey) {
+    if (selectVariableByShortcut(event.key)) event.preventDefault();
     return;
   }
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
