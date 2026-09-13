@@ -41,8 +41,8 @@ bun run dev
 ## コンテナと Kubernetes
 
 ```sh
-docker build -t ubuntu.home.arpa/weather-zarr-viewer:0.1.1 .
-docker push ubuntu.home.arpa/weather-zarr-viewer:0.1.1
+docker build -t ubuntu.home.arpa/weather-zarr-viewer:0.1.2 .
+docker push ubuntu.home.arpa/weather-zarr-viewer:0.1.2
 kubectl apply --dry-run=client -f weather-viewer.yaml
 kubectl apply -f weather-viewer.yaml
 ```
