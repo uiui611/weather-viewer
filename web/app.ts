@@ -327,8 +327,21 @@ function stepModelCycle(offset: number): void {
   const current = collectionDatasets.findIndex((dataset) => dataset.id === datasetSelect.value);
   const next = Math.min(collectionDatasets.length - 1, Math.max(0, current + offset));
   if (current < 0 || next === current) return;
+  const currentForecastHour = selectedDataset().times[Number(timeRange.value)]?.forecastHour;
   datasetSelect.value = collectionDatasets[next]!.id;
   populateVariables();
+  if (currentForecastHour !== undefined) {
+    const targetTimes = selectedDataset().times;
+    let closestIndex = 0;
+    for (let index = 1; index < targetTimes.length; index += 1) {
+      const closestDistance = Math.abs(
+        targetTimes[closestIndex]!.forecastHour - currentForecastHour,
+      );
+      const candidateDistance = Math.abs(targetTimes[index]!.forecastHour - currentForecastHour);
+      if (candidateDistance < closestDistance) closestIndex = index;
+    }
+    timeRange.value = String(closestIndex);
+  }
   void loadGrid();
 }
 
