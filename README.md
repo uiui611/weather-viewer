@@ -38,6 +38,9 @@ bun run dev
 インデックスは `http://localhost:3000/weather-view`、気象地図は
 `http://localhost:3000/weather-view/map`、ヘルスチェックは `/weather-view/healthz` です。
 
+気象地図の選択状態は `collection`（データ系列）と `variable`（気象要素）の
+クエリパラメータへ反映されるため、そのまま共有用リンクとして利用できます。
+
 ## コンテナと Kubernetes
 
 ```sh

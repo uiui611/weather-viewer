@@ -258,13 +258,14 @@ function populateDatasets(): void {
   datasetSelect.disabled = collectionDatasets.length === 0;
 }
 
-function populateVariables(): void {
+function populateVariables(preferred = variableSelect.value): void {
   const dataset = selectedDataset();
-  const previous = variableSelect.value;
   variableSelect.replaceChildren(
     ...dataset.variables.map((variable) => new Option(variable.label, variable.id)),
   );
-  if (dataset.variables.some((variable) => variable.id === previous)) variableSelect.value = previous;
+  if (dataset.variables.some((variable) => variable.id === preferred)) {
+    variableSelect.value = preferred;
+  }
   variableSelect.disabled = false;
   timeRange.max = String(Math.max(0, dataset.times.length - 1));
   timeRange.value = "0";
@@ -272,6 +273,17 @@ function populateVariables(): void {
   timePrev.disabled = false;
   timeNext.disabled = false;
   updateTimeLabels();
+}
+
+function selectionUrl(): URL {
+  const url = new URL(window.location.href);
+  url.searchParams.set("collection", collectionSelect.value);
+  url.searchParams.set("variable", variableSelect.value);
+  return url;
+}
+
+function replaceSelectionUrl(): void {
+  window.location.replace(selectionUrl());
 }
 
 function updateTimeLabels(): void {
@@ -358,10 +370,19 @@ async function initialize(): Promise<void> {
     collectionSelect.replaceChildren(
       ...collections.map((collection) => new Option(collection, collection)),
     );
+    const query = new URLSearchParams(window.location.search);
+    const requestedCollection = query.get("collection");
+    if (requestedCollection && collections.includes(requestedCollection)) {
+      collectionSelect.value = requestedCollection;
+    }
     collectionSelect.disabled = false;
     populateDatasets();
     $("#connection-label").textContent = `RustFS · ${collections.length} 系列 · ${datasets.length} cycles`;
-    populateVariables();
+    populateVariables(query.get("variable") ?? undefined);
+    const canonicalUrl = selectionUrl();
+    if (canonicalUrl.href !== window.location.href) {
+      window.history.replaceState(null, "", canonicalUrl);
+    }
     await loadGrid();
   } catch (error) {
     loading.hidden = true;
@@ -372,15 +393,13 @@ async function initialize(): Promise<void> {
 }
 
 collectionSelect.addEventListener("change", () => {
-  populateDatasets();
-  populateVariables();
-  void loadGrid();
+  replaceSelectionUrl();
 });
 datasetSelect.addEventListener("change", () => {
   populateVariables();
   void loadGrid();
 });
-variableSelect.addEventListener("change", () => void loadGrid());
+variableSelect.addEventListener("change", replaceSelectionUrl);
 timeRange.addEventListener("input", updateTimeLabels);
 timeRange.addEventListener("change", () => void loadGrid());
 timePrev.addEventListener("click", () => stepForecastTime(-1));
