@@ -35,8 +35,8 @@ AWS_SECRET_ACCESS_KEY=... \
 bun run dev
 ```
 
-既定 URL は `http://localhost:3000/weather-viewer/`、ヘルスチェックは
-`/weather-viewer/healthz` です。
+インデックスは `http://localhost:3000/weather-view`、気象地図は
+`http://localhost:3000/weather-view/map`、ヘルスチェックは `/weather-view/healthz` です。
 
 ## コンテナと Kubernetes
 
@@ -56,15 +56,15 @@ upstream weather_zarr_viewer {
     server 192.168.101.13:30810;
 }
 
-location /weather-viewer/ {
+location /weather-view/ {
     proxy_pass http://weather_zarr_viewer;
 }
 ```
 
 ## API
 
-- `GET /weather-viewer/api/catalog`: 設定した各系列から `_SUCCESS` がある Zarr と変数・予報時刻を列挙
-- `GET /weather-viewer/api/grid`: 指定した変数・時刻の日本周辺格子を返却
-- `GET /weather-viewer/healthz`: プロセスのヘルスチェック
+- `GET /weather-view/api/catalog`: 設定した各系列から `_SUCCESS` がある Zarr と変数・予報時刻を列挙
+- `GET /weather-view/api/grid`: 指定した変数・時刻の日本周辺格子を返却
+- `GET /weather-view/healthz`: プロセスのヘルスチェック
 
 RustFS のアクセスキーはサーバー内だけで使用され、API やブラウザには返しません。

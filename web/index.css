@@ -1,0 +1,26 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@500&family=Noto+Sans+JP:wght@400;600;700&display=swap");
+
+:root {
+  font-family: "Noto Sans JP", sans-serif;
+  color: #f5f1df;
+  background: #102a2b;
+}
+
+* { box-sizing: border-box; }
+body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: radial-gradient(circle at 75% 20%, #264b47 0, #102a2b 48%, #091b1c 100%); }
+.index-shell { width: min(620px, calc(100% - 40px)); padding: 56px; border: 1px solid rgba(255,255,255,.14); background: rgba(12,35,36,.72); box-shadow: 0 24px 80px rgba(0,0,0,.24); }
+.brand-mark { display: flex; align-items: end; gap: 4px; width: 38px; height: 36px; margin-bottom: 28px; }
+.brand-mark span { display: block; width: 9px; background: #ec6f4e; transform: skewY(-12deg); }
+.brand-mark span:nth-child(1) { height: 15px; }
+.brand-mark span:nth-child(2) { height: 27px; background: #ef9c5b; }
+.brand-mark span:nth-child(3) { height: 35px; background: #d8d88d; }
+.eyebrow { margin: 0 0 10px; font: 500 10px "DM Mono", monospace; letter-spacing: .2em; color: #9bb1ac; }
+h1 { margin: 0; font-size: clamp(32px, 7vw, 54px); line-height: 1.1; letter-spacing: -.035em; }
+.summary { max-width: 470px; margin: 24px 0 34px; color: #b7c7c2; font-size: 14px; line-height: 1.9; }
+.map-link { display: inline-flex; align-items: center; gap: 28px; padding: 14px 18px; color: #102a2b; background: #f0d284; font-weight: 700; text-decoration: none; }
+.map-link:hover { background: #ffd979; }
+.map-link:focus-visible { outline: 3px solid #ec6f4e; outline-offset: 4px; }
+
+@media (max-width: 560px) {
+  .index-shell { padding: 36px 28px; }
+}

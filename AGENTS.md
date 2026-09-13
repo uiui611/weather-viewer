@@ -113,9 +113,10 @@ kubectl port-forward -n default service/rustfs 19000:9000
 `bun run dev`を起動してください。既定URLは次の通りです。
 
 ```text
-http://localhost:3000/weather-viewer/
-http://localhost:3000/weather-viewer/healthz
-http://localhost:3000/weather-viewer/api/catalog
+http://localhost:3000/weather-view
+http://localhost:3000/weather-view/map
+http://localhost:3000/weather-view/healthz
+http://localhost:3000/weather-view/api/catalog
 ```
 
 最低限、カタログに `noaa-gfs/YYYYMMDDHH.zarr` が現れることと、最新サイクルの
@@ -138,7 +139,7 @@ kubectl rollout status deployment/weather-zarr-viewer -n default --timeout=180s
 - replicas: 3
 - Service: `weather-zarr-viewer`
 - NodePort: `30810`
-- URL prefix: `/weather-viewer`
+- URL prefix: `/weather-view`
 - RustFS endpoint: `http://rustfs.default.svc.cluster.local:9000`
 
 2026-09-13に `ubuntu.home.arpa/weather-zarr-viewer:0.1.1` をpushし、digest
@@ -157,12 +158,12 @@ Ready、再起動0、worker1～3への配置を確認しました。サービス
 
 ## 外部公開
 
-前段Nginxの `/weather-viewer/` locationは、このリポジトリでは管理していません。
+前段Nginxの `/weather-view/` locationは、このリポジトリでは管理していません。
 NodePortまでは稼働確認済みですが、Nginx経由の公開URLが必要な場合はubuntuサーバー上の
 `/home/mizu/containers` リポジトリを別途変更します。その作業前に同リポジトリの
 `AGENTS.md`を最後まで読み、既存変更を保持してください。
 
-Nginxの `proxy_pass` は末尾に `/` を付けず、`/weather-viewer/` prefixをupstreamへ
+Nginxの `proxy_pass` は末尾に `/` を付けず、`/weather-view/` prefixをupstreamへ
 保持する必要があります。
 
 ## 既知の制約

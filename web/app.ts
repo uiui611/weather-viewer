@@ -53,7 +53,7 @@ const timePrev = $<HTMLButtonElement>("#time-prev");
 const timeNext = $<HTMLButtonElement>("#time-next");
 const loading = $("#loading");
 const errorCard = $("#error");
-const basePath = window.location.pathname.replace(/\/$/, "");
+const basePath = window.location.pathname.replace(/\/map\/?$/, "");
 
 const PALETTES: Record<string, Array<[number, string]>> = {
   temperature: [

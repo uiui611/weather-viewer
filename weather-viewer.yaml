@@ -17,11 +17,11 @@
 #
 # 適用後の確認:
 #   kubectl rollout status deployment/weather-zarr-viewer -n default
-#   curl http://<worker-ip>:30810/weather-viewer/healthz
+#   curl http://<worker-ip>:30810/weather-view/healthz
 #
 # 注意事項:
 #   - RustFS の認証情報はブラウザへ渡さず、サーバー側だけで使用します。
-#   - 外部 Nginx で公開する場合は `/weather-viewer/` prefix を upstream へ保持してください。
+#   - 外部 Nginx で公開する場合は `/weather-view/` prefix を upstream へ保持してください。
 #   - 背景地図には常時、国土地理院および小縮尺タイルの出典を表示します。
 apiVersion: v1
 kind: ConfigMap
@@ -29,7 +29,7 @@ metadata:
   name: weather-zarr-viewer
   namespace: default
 data:
-  APP_BASE_PATH: /weather-viewer
+  APP_BASE_PATH: /weather-view
   S3_ENDPOINT_URL: http://rustfs.default.svc.cluster.local:9000
   AWS_REGION: us-east-1
   S3_BUCKET: weather
@@ -93,14 +93,14 @@ spec:
               protocol: TCP
           readinessProbe:
             httpGet:
-              path: /weather-viewer/healthz
+              path: /weather-view/healthz
               port: http
             initialDelaySeconds: 3
             periodSeconds: 5
             timeoutSeconds: 3
           livenessProbe:
             httpGet:
-              path: /weather-viewer/healthz
+              path: /weather-view/healthz
               port: http
             initialDelaySeconds: 10
             periodSeconds: 10

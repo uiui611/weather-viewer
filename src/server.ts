@@ -1,8 +1,9 @@
-import app from "../web/index.html";
+import indexPage from "../web/index.html";
+import mapPage from "../web/map.html";
 import { getCatalog, getGrid, storageConfig } from "./zarr";
 
 const port = Number(process.env.PORT ?? 3000);
-const configuredBase = process.env.APP_BASE_PATH ?? "/weather-viewer";
+const configuredBase = process.env.APP_BASE_PATH ?? "/weather-view";
 const base = `/${configuredBase.replace(/^\/+|\/+$/g, "")}`;
 
 function json(data: unknown, status = 200): Response {
@@ -22,7 +23,9 @@ function errorResponse(error: unknown): Response {
 const server = Bun.serve({
   port,
   routes: {
-    [`${base}/`]: app,
+    [base]: indexPage,
+    [`${base}/`]: indexPage,
+    [`${base}/map`]: mapPage,
     [`${base}/api/catalog`]: {
       async GET() {
         try {
@@ -60,7 +63,6 @@ const server = Bun.serve({
   },
   fetch(request) {
     const url = new URL(request.url);
-    if (url.pathname === base) return Response.redirect(`${url.origin}${base}/`, 308);
     return new Response("Not Found", { status: 404 });
   },
 });
