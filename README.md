@@ -45,12 +45,56 @@ bun run dev
 
 ## コンテナと Kubernetes
 
+`.github/workflows/publish-image.yml` は main への push（PR の merge を含む）ごとに
+Dockerfile から `linux/amd64` イメージをビルドし、GHCR へ公開します。
+PR ではビルドのみを検証し、イメージを公開しません。main に対する手動実行も可能です。
+
+- `ghcr.io/uiui611/weather-viewer:main`: main の最新ビルド
+- `ghcr.io/uiui611/weather-viewer:sha-<40桁のcommit SHA>`: コミットごとのイメージ
+
+認証には GitHub が自動発行する `GITHUB_TOKEN` と workflow 内の `packages: write` を使います。
+PAT や追加の repository secret は不要です。第三者 Actions は固定 commit SHA で参照します。
+
+### GitHub で必要な設定
+
+1. Repository の **Settings → Actions → General** で Actions を有効にします。
+   利用制限がある場合は `actions/checkout` と workflow で参照する `docker/*` Actions を許可してください。
+   token の既定権限は read-only のままで構いません。publish job が必要な権限だけを指定します。
+2. この変更を main へ merge し、**Actions → Build and publish container image** の成功を確認します。
+3. 初回公開後、アカウントの **Packages → weather-viewer → Package settings** で
+   **Change visibility → Public** にします。リポジトリが public でも、初回の GHCR package は
+   private が既定です。このマニフェストは匿名 pull を前提とし、`imagePullSecrets` を指定しません。
+4. 同名 package がすでにある場合は、接続先 repository が `uiui611/weather-viewer` であり、
+   **Manage Actions access** でこの repository に Write 権限があることを確認します。
+   workflow の OCI source label により、新規 package は repository に関連付けられます。
+
+仕様: [GHCR の公開範囲と認証](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
+
+### Kubernetes への適用と更新
+
+各 worker ノードから `ghcr.io` とイメージ配信先への HTTPS 通信が必要です。
+package を Public に設定した後、匿名 pull を確認してからマニフェストを適用します。
+
 ```sh
-docker build -t ubuntu.home.arpa/weather-zarr-viewer:0.1.4 .
-docker push ubuntu.home.arpa/weather-zarr-viewer:0.1.4
+docker pull ghcr.io/uiui611/weather-viewer:main
 kubectl apply --dry-run=client -f weather-viewer.yaml
 kubectl apply -f weather-viewer.yaml
+kubectl rollout status deployment/weather-zarr-viewer -n default --timeout=180s
 ```
+
+マニフェストは更新される `main` タグを使い、`imagePullPolicy: Always` で Pod 作成時に取得します。
+Actions はイメージ公開までを行い、クラスタを自動更新しません。次回以降のビルド成功後は、
+新しいイメージに切り替えるタイミングで実行してください。
+
+```sh
+kubectl rollout restart deployment/weather-zarr-viewer -n default
+kubectl rollout status deployment/weather-zarr-viewer -n default --timeout=180s
+```
+
+再現性や確実なロールバックが必要な運用では、`image` を `sha-<40桁のcommit SHA>` タグまたは
+`ghcr.io/uiui611/weather-viewer@sha256:<digest>` に固定してから適用してください。
+`main` タグのままでは過去の ReplicaSet も同じタグを参照するため、過去のイメージへ戻すには
+そのビルドの SHA タグまたは digest を明示する必要があります。
 
 外部 Nginx から公開する場合は URL prefix を削除せず転送します。
 
