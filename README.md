@@ -83,7 +83,8 @@ kubectl rollout status deployment/weather-zarr-viewer -n default --timeout=180s
 ```
 
 マニフェストは更新される `main` タグを使い、`imagePullPolicy: Always` で Pod 作成時に取得します。
-Actions はイメージ公開後、OIDC 認証付き webhook で Deployment の更新を開始します。HTTP 202 の受付確認で成功とし、Pod の起動完了は待ちません。手動で再更新する場合は、
+Actions はイメージ公開後、OIDC 認証付き webhook で Deployment の更新を要求します。
+通知に失敗してもイメージ公開と workflow は成功扱いとし、警告を記録します。Pod の起動完了は待ちません。手動で再更新する場合は、
 以下を実行してください。
 
 ```sh
@@ -119,9 +120,11 @@ SSH 秘密鍵、管理者 kubeconfig、共有 webhook secret を GitHub に登�
 
 最初の通知前に、VPS の TLS 証明書、Ubuntu の受信サービス、専用 Kubernetes 認証情報と
 RBAC を用意し、Deployment を GHCR の main と Always に切り替えてください。
-構成と初回準備は [k8s-services の deployment-webhook](https://github.com/uiui611/k8s-services/tree/codex/deployment-webhook/deployment-webhook) にあります。
-HTTP 202 は更新要求の受付成功であり、更新完了を示しません。失敗時は受信サービスのログと
-Deployment の状態を確認し、必要なら最新 main の Actions を再実行します。
+受信側の設定は Ubuntu の `/home/mizu/containers/deployment-webhook/README.md` で管理します。
+通知は公開後に一度だけ送信し、HTTP 2xx を成功扱いとします。認証とリクエスト内容の検証は
+受信側に任せ、応答本文や Pod の起動状態は確認しません。通知失敗は警告となり、workflow を失敗させません。
+更新が必要な場合は受信サービスのログを確認して手動で更新するか、最新 main の Actions を再実行します。
+再実行でもそのコミットのイメージを `main` タグへ公開するため、最新 main の実行を選んでください。
 通知のテストは `node --test .github/scripts/notify-deployment.test.mjs` で実行できます。
 
 ## API
