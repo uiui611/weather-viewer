@@ -26,6 +26,7 @@ RustFS の `weather` バケットに保存された NOAA/NCEP GFS 0.25° Zarr v2
 - `web/index.html`, `web/styles.css`: 画面構造とスタイル
 - `weather-viewer.yaml`: ConfigMap、Deployment、NodePort Service
 - `Dockerfile`: 本番コンテナ
+- `.github/workflows/publish-image.yml`: PR のビルド検証と main の GHCR 公開
 - `README.md`: 利用者・運用者向け手順
 
 ## RustFS のデータ契約
@@ -124,11 +125,15 @@ http://localhost:3000/weather-viewer/api/catalog
 
 ## ビルドとデプロイ
 
-現在のアプリ/イメージタグは `0.1.4` です。
+現在のアプリバージョンは `0.1.4` です。main への push で GitHub Actions が
+`ghcr.io/uiui611/weather-viewer:main` と `sha-<40桁のcommit SHA>` を公開します。
+PR はビルドのみで公開しません。認証は `GITHUB_TOKEN` の `packages: write` を使用します。
+GHCR package は初回公開後に Public に設定してください。手順は README.md にあります。
+マニフェストは main タグを Always で取得し、クラスタへの更新は手動です。
 
 ```sh
-docker build -t ubuntu.home.arpa/weather-zarr-viewer:0.1.4 .
-docker push ubuntu.home.arpa/weather-zarr-viewer:0.1.4
+# main への push 後、GitHub Actions のイメージ公開成功と GHCR package の Public 設定を確認
+docker pull ghcr.io/uiui611/weather-viewer:main
 kubectl apply -f weather-viewer.yaml
 kubectl rollout status deployment/weather-zarr-viewer -n default --timeout=180s
 ```
@@ -164,7 +169,8 @@ Ready、再起動0、worker1～3への配置を確認しました。`/weather-vi
 
 同じタグを上書きする場合、既存Podは自動で新しい内容を取得しません。
 タグ上書き後は `kubectl rollout restart` を行うか、マニフェストのイメージタグを更新してください。
-再現性が必要な変更では、新しい固定タグまたはdigest指定を推奨します。
+再現性が必要な変更では、GHCR の SHA タグまたはdigest指定を推奨します。
+main タグを使う場合、過去の ReplicaSet への rollout undo だけでは以前のイメージに戻りません。
 
 ## 外部公開
 

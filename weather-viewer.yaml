@@ -11,7 +11,8 @@
 # 前提条件:
 #   - 対象 Namespace は `default` です。
 #   - Secret `rustfs-credentials` に `RUSTFS_ACCESS_KEY` と `RUSTFS_SECRET_KEY` が必要です。
-#   - イメージ `ubuntu.home.arpa/weather-zarr-viewer:0.1.4` を build/push してください。
+#   - main の GitHub Actions が `ghcr.io/uiui611/weather-viewer:main` を公開済みであること。
+#   - GHCR package の visibility を Public に設定し、各ノードから匿名 pull できる必要があります。
 #   - Pod から `rustfs.default.svc.cluster.local:9000` へ到達できる必要があります。
 #   - 利用者のブラウザから `cyberjapandata.gsi.go.jp` へ HTTPS 接続できる必要があります。
 #
@@ -20,6 +21,8 @@
 #   curl http://<worker-ip>:30810/weather-viewer/healthz
 #
 # 注意事項:
+#   - `main` は更新されるタグのため Always で取得します。新しいイメージの適用には rollout restart が必要です。
+#   - 再現性が必要な場合は `sha-<40桁のcommit SHA>` タグまたは digest に固定してください。
 #   - RustFS の認証情報はブラウザへ渡さず、サーバー側だけで使用します。
 #   - 外部 Nginx で公開する場合は `/weather-viewer/` prefix を upstream へ保持してください。
 #   - 背景地図には常時、国土地理院および小縮尺タイルの出典を表示します。
@@ -63,8 +66,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: viewer
-          image: ubuntu.home.arpa/weather-zarr-viewer:0.1.4
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/uiui611/weather-viewer:main
+          imagePullPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
