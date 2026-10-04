@@ -60,7 +60,7 @@ PAT や追加の repository secret は不要です。第三者 Actions は固定
 1. Repository の **Settings → Actions → General** で Actions を有効にします。
    利用制限がある場合は `actions/checkout` と workflow で参照する `docker/*` Actions を許可してください。
    token の既定権限は read-only のままで構いません。publish job が必要な権限だけを指定します。
-2. この変更を main へ merge し、**Actions → Build and publish container image** の成功を確認します。
+2. この変更を main へ merge し、**Actions → Build, publish and deploy container image** の成功を確認します。
 3. 初回公開後、アカウントの **Packages → weather-viewer → Package settings** で
    **Change visibility → Public** にします。リポジトリが public でも、初回の GHCR package は
    private が既定です。このマニフェストは匿名 pull を前提とし、`imagePullSecrets` を指定しません。
@@ -83,8 +83,8 @@ kubectl rollout status deployment/weather-zarr-viewer -n default --timeout=180s
 ```
 
 マニフェストは更新される `main` タグを使い、`imagePullPolicy: Always` で Pod 作成時に取得します。
-Actions はイメージ公開までを行い、クラスタを自動更新しません。次回以降のビルド成功後は、
-新しいイメージに切り替えるタイミングで実行してください。
+Actions はイメージ公開後、OIDC 認証付き webhook で Deployment の更新を開始します。HTTP 202 の受付確認で成功とし、Pod の起動完了は待ちません。手動で再更新する場合は、
+以下を実行してください。
 
 ```sh
 kubectl rollout restart deployment/weather-zarr-viewer -n default
@@ -109,6 +109,20 @@ location /weather-viewer/ {
     proxy_pass http://weather_zarr_viewer;
 }
 ```
+
+### 自動更新 webhook の準備
+
+main のイメージ公開後に `https://deploy.mizu-mizu.info/v1/deployments` へ通知します。
+認証には GitHub OIDC を使い、publish job に `id-token: write` を指定します。
+SSH 秘密鍵、管理者 kubeconfig、共有 webhook secret を GitHub に登録する必要はありません。
+受信側はこのリポジトリの main と `.github/workflows/publish-image.yml` を許可します。
+
+最初の通知前に、VPS の TLS 証明書、Ubuntu の受信サービス、専用 Kubernetes 認証情報と
+RBAC を用意し、Deployment を GHCR の main と Always に切り替えてください。
+構成と初回準備は [k8s-services の deployment-webhook](https://github.com/uiui611/k8s-services/tree/codex/deployment-webhook/deployment-webhook) にあります。
+HTTP 202 は更新要求の受付成功であり、更新完了を示しません。失敗時は受信サービスのログと
+Deployment の状態を確認し、必要なら最新 main の Actions を再実行します。
+通知のテストは `node --test .github/scripts/notify-deployment.test.mjs` で実行できます。
 
 ## API
 

@@ -129,7 +129,7 @@ http://localhost:3000/weather-viewer/api/catalog
 `ghcr.io/uiui611/weather-viewer:main` と `sha-<40桁のcommit SHA>` を公開します。
 PR はビルドのみで公開しません。認証は `GITHUB_TOKEN` の `packages: write` を使用します。
 GHCR package は初回公開後に Public に設定してください。手順は README.md にあります。
-マニフェストは main タグを Always で取得し、クラスタへの更新は手動です。
+マニフェストは main タグを Always で取得します。GHCR 公開後に GitHub OIDC 認証付き webhook で更新を開始し、HTTP 202 の受付成功で Actions を完了します。Pod の起動完了は待ちません。受信側の専用認証情報・RBAC と VPS の TLS を準備してから初回通知してください。
 
 ```sh
 # main への push 後、GitHub Actions のイメージ公開成功と GHCR package の Public 設定を確認
