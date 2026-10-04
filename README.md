@@ -125,7 +125,6 @@ RBAC を用意し、Deployment を GHCR の main と Always に切り替えて�
 受信側に任せ、応答本文や Pod の起動状態は確認しません。通知失敗は警告となり、workflow を失敗させません。
 更新が必要な場合は受信サービスのログを確認して手動で更新するか、最新 main の Actions を再実行します。
 再実行でもそのコミットのイメージを `main` タグへ公開するため、最新 main の実行を選んでください。
-通知のテストは `node --test .github/scripts/notify-deployment.test.mjs` で実行できます。
 
 ## API
 
