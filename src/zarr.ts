@@ -6,7 +6,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { Blosc } from "numcodecs";
 import { createHash } from "node:crypto";
-import { AsyncCache } from "./cache";
+import { AsyncCache, SerialQueue } from "./cache";
 import { encodeGrayscalePng } from "./png";
 import {
   TRANSPORT_VERSION, MISSING_VALUE, VARIABLE_PRESENTATION, quantize, validateGrid,
@@ -36,7 +36,7 @@ interface GridResponse {
   variable: VariableInfo;
   lats: number[];
   lons: number[];
-  values: Array<number | null>;
+  pixels: Uint8Array;
   shape: [number, number];
 }
 
@@ -105,17 +105,17 @@ async function decodeChunk(root: string, arrayName: string, chunk: number[]): Pr
   ).decode(encoded);
 }
 
-function typedNumbers(bytes: Uint8Array, dtype: string): number[] {
+function typedValues(bytes: Uint8Array, dtype: string) {
   const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
   switch (dtype) {
     case "<f4":
-      return Array.from(new Float32Array(buffer));
+      return new Float32Array(buffer);
     case "<f8":
-      return Array.from(new Float64Array(buffer));
+      return new Float64Array(buffer);
     case "<i4":
-      return Array.from(new Int32Array(buffer));
+      return new Int32Array(buffer);
     case "<i8":
-      return Array.from(new BigInt64Array(buffer), Number);
+      return new BigInt64Array(buffer);
     default:
       throw new Error(`Unsupported Zarr dtype: ${dtype}`);
   }
@@ -124,7 +124,7 @@ function typedNumbers(bytes: Uint8Array, dtype: string): number[] {
 async function readVector(root: string, name: string): Promise<number[]> {
   const consolidated = await metadata(root);
   const array = asArrayMetadata(consolidated.metadata[`${name}/.zarray`]!);
-  return typedNumbers(await decodeChunk(root, name, [0]), array.dtype).slice(0, array.shape[0]);
+  return Array.from(typedValues(await decodeChunk(root, name, [0]), array.dtype).subarray(0, array.shape[0]), Number);
 }
 
 function variableInfo(name: string, attrs: JsonRecord): VariableInfo | undefined {
@@ -162,6 +162,53 @@ async function listObjects(): Promise<_Object[]> {
   return objects;
 }
 
+type GridDataset = Pick<DatasetInfo, "id" | "root" | "collection" | "variables" | "times">;
+
+async function datasetDetails(root: string): Promise<GridDataset> {
+  const consolidated = await metadata(root);
+  const variables = Object.keys(consolidated.metadata)
+    .filter((key) => key.endsWith("/.zarray"))
+    .map((key) => {
+      const name = key.slice(0, -"/.zarray".length);
+      return variableInfo(name, consolidated.metadata[`${name}/.zattrs`] ?? {});
+    })
+    .filter((value): value is VariableInfo => value !== undefined);
+  const [forecastHours, validTimes] = await Promise.all([
+    readVector(root, "forecast_hour"), readVector(root, "valid_time"),
+  ]);
+  return {
+    id: root, root,
+    collection: PREFIXES.find((prefix) => root.startsWith(`${prefix}/`)) ?? "",
+    variables,
+    times: forecastHours.map((forecastHour, index) => ({
+      index, forecastHour, validTime: new Date((validTimes[index] ?? 0) / 1_000_000).toISOString(),
+    })),
+  };
+}
+
+const datasetCache = new AsyncCache<GridDataset>(64);
+function datasetForGrid(root: string): Promise<GridDataset> {
+  // A PNG request can land on a replica that never served the catalog. Verify
+  // just this completed dataset rather than listing every weather object.
+  if (!PREFIXES.some((prefix) => root.startsWith(`${prefix}/`))) {
+    return Promise.reject(new Error("Unknown dataset"));
+  }
+  return datasetCache.get(root, async () => {
+    try {
+      const [group] = await Promise.all([
+        jsonObject<JsonRecord>(`${root}/.zgroup`), objectBytes(`${root}/_SUCCESS`, false),
+      ]);
+      if (group.zarr_format !== 2) throw new Error("Unsupported Zarr group");
+    } catch (error) {
+      if (error instanceof Error && ["NoSuchKey", "NotFound"].includes(error.name)) {
+        throw new Error("Unknown dataset");
+      }
+      throw error;
+    }
+    return datasetDetails(root);
+  });
+}
+
 export async function getCatalog(force = false): Promise<DatasetInfo[]> {
   if (!force && catalogCache && catalogCache.expires > Date.now()) return catalogCache.datasets;
   const objects = await listObjects();
@@ -175,22 +222,10 @@ export async function getCatalog(force = false): Promise<DatasetInfo[]> {
     roots.map(async (root): Promise<DatasetInfo> => {
       const consolidated = await metadata(root);
       const groupAttrs = consolidated.metadata[".zattrs"] ?? {};
-      const variables = Object.entries(consolidated.metadata)
-        .filter(([key]) => key.endsWith("/.zarray"))
-        .map(([key]) => {
-          const name = key.slice(0, -"/.zarray".length);
-          return variableInfo(name, consolidated.metadata[`${name}/.zattrs`] ?? {});
-        })
-        .filter((value): value is VariableInfo => value !== undefined);
-      const [forecastHours, validTimes] = await Promise.all([
-        readVector(root, "forecast_hour"),
-        readVector(root, "valid_time"),
-      ]);
+      const details = await datasetDetails(root);
       const rootObjects = objects.filter((object) => object.Key?.startsWith(`${root}/`));
       return {
-        id: root,
-        root,
-        collection: PREFIXES.find((prefix) => root === prefix || root.startsWith(`${prefix}/`)) ?? "",
+        ...details,
         cycle: asString(groupAttrs.cycle, asString(groupAttrs.forecast_reference_time)),
         title: asString(groupAttrs.title, "NOAA NCEP GFS"),
         source: asString(groupAttrs.source),
@@ -206,12 +241,6 @@ export async function getCatalog(force = false): Promise<DatasetInfo[]> {
               ),
             ).toISOString()
           : "",
-        variables,
-        times: forecastHours.map((forecastHour, index) => ({
-          index,
-          forecastHour,
-          validTime: new Date((validTimes[index] ?? 0) / 1_000_000).toISOString(),
-        })),
       };
     }),
   );
@@ -223,13 +252,10 @@ export async function getCatalog(force = false): Promise<DatasetInfo[]> {
 }
 
 async function getGrid(
-  datasetId: string,
+  dataset: GridDataset,
   variableId: string,
   timeIndex: number,
 ): Promise<GridResponse> {
-  const catalog = await getCatalog();
-  const dataset = catalog.find((entry) => entry.id === datasetId);
-  if (!dataset) throw new Error("Unknown dataset");
   const variable = dataset.variables.find((entry) => entry.id === variableId);
   if (!variable) throw new Error("Unknown variable");
   const time = dataset.times[timeIndex];
@@ -258,38 +284,39 @@ async function getGrid(
     shape: [latIndices.length, lonIndices.length],
     lats: latIndices.map(({ value }) => value), lons: lonIndices.map(({ value }) => value),
   });
-  const chunks = new Map<string, { values: number[]; shape: number[] }>();
-  async function chunkFor(latIndex: number, lonIndex: number) {
-    const coords = [
-      Math.floor(timeIndex / array.chunks[0]!),
-      Math.floor(latIndex / array.chunks[1]!),
-      Math.floor(lonIndex / array.chunks[2]!),
-    ];
-    const key = coords.join(".");
-    if (!chunks.has(key)) {
-      // Zarr v2 edge chunks are padded to the declared chunk shape, not the
-      // remaining array extent. Use the declared strides for pixel offsets.
-      const values = typedNumbers(await decodeChunk(datasetRoot, selectedVariableId, coords), array.dtype);
-      if (values.length !== array.chunks.reduce((a, b) => a * b, 1)) {
-        throw new Error("Unsupported weather chunk size");
-      }
-      chunks.set(key, { values, shape: array.chunks });
-    }
-    return { chunk: chunks.get(key)!, coords };
+  // Group the selected coordinates by source chunk. Only one decoded chunk is
+  // retained, and every sample goes straight to its final 8-bit PNG position.
+  function groups(indices: Array<{ index: number }>, size: number) {
+    const result = new Map<number, Array<{ source: number; target: number }>>();
+    indices.forEach(({ index }, target) => {
+      const coord = Math.floor(index / size);
+      if (!result.has(coord)) result.set(coord, []);
+      result.get(coord)!.push({ source: index - coord * size, target });
+    });
+    return result;
   }
-
-  const values: Array<number | null> = [];
-  for (const lat of latIndices) {
-    for (const lon of lonIndices) {
-      const { chunk, coords } = await chunkFor(lat.index, lon.index);
-      const localTime = timeIndex - coords[0]! * array.chunks[0]!;
-      const localLat = lat.index - coords[1]! * array.chunks[1]!;
-      const localLon = lon.index - coords[2]! * array.chunks[2]!;
-      const offset = (localTime * chunk.shape[1]! + localLat) * chunk.shape[2]! + localLon;
-      const raw = chunk.values[offset];
-      const fill = array.fill_value;
-      values.push(raw === undefined || !Number.isFinite(raw) ||
-        (typeof fill === "number" && raw === fill) ? null : transformValue(variable.id, raw));
+  const latGroups = groups(latIndices, array.chunks[1]!);
+  const lonGroups = groups(lonIndices, array.chunks[2]!);
+  const pixels = new Uint8Array(latIndices.length * lonIndices.length);
+  const timeChunk = Math.floor(timeIndex / array.chunks[0]!);
+  const localTime = timeIndex % array.chunks[0]!;
+  const chunkLength = array.chunks.reduce((a, b) => a * b, 1);
+  for (const [cy, rows] of latGroups) {
+    for (const [cx, columns] of lonGroups) {
+      const values = typedValues(await decodeChunk(datasetRoot, selectedVariableId, [timeChunk, cy, cx]), array.dtype);
+      if (values.length !== chunkLength) throw new Error("Unsupported weather chunk size");
+      for (const row of rows) {
+        // Edge chunks retain the declared strides, including padded samples.
+        const sourceOffset = (localTime * array.chunks[1]! + row.source) * array.chunks[2]!;
+        const targetOffset = row.target * lonIndices.length;
+        for (const column of columns) {
+          const raw = Number(values[sourceOffset + column.source]);
+          const fill = array.fill_value;
+          pixels[targetOffset + column.target] = !Number.isFinite(raw) ||
+            (typeof fill === "number" && raw === fill) ? MISSING_VALUE :
+            quantize(transformValue(variable.id, raw), variable.encoding);
+        }
+      }
     }
   }
 
@@ -297,7 +324,7 @@ async function getGrid(
     variable,
     lats: latIndices.map(({ value }) => value),
     lons: lonIndices.map(({ value }) => value),
-    values,
+    pixels,
     shape: [latIndices.length, lonIndices.length],
   };
 }
@@ -305,11 +332,17 @@ async function getGrid(
 const sourceCache = new AsyncCache<{ revision: string; metadata: SourceMetadata }>(64);
 const sourceDocuments = new Map<string, SourceMetadata>();
 const pngCache = new AsyncCache<Buffer>(256);
+const pngQueue = new SerialQueue();
 
 async function describeSource(collection: string): Promise<{ revision: string; metadata: SourceMetadata }> {
   const catalog = await getCatalog();
   const dataset = catalog.find((entry) => entry.collection === collection);
   if (!dataset) throw new Error("Unknown collection");
+  return describeDatasetSource(dataset);
+}
+
+async function describeDatasetSource(dataset: GridDataset): Promise<{ revision: string; metadata: SourceMetadata }> {
+  const collection = dataset.collection;
   return sourceCache.get(JSON.stringify([collection, dataset.id]), async () => {
     const [allLats, allLons] = await Promise.all([
       readVector(dataset.root, "latitude"), readVector(dataset.root, "longitude"),
@@ -364,11 +397,12 @@ export async function getSourceMetadata(collection: string, revision: string): P
 export function getGridPng(
   datasetId: string, variableId: string, timeIndex: number, revision: string,
 ): Promise<Buffer> {
-  return pngCache.get(JSON.stringify([datasetId, variableId, timeIndex, revision]), async () => {
-    const dataset = (await getCatalog()).find((entry) => entry.id === datasetId);
-    if (!dataset) throw new Error("Unknown dataset");
-    const metadata = await getSourceMetadata(dataset.collection, revision);
-    const grid = await getGrid(datasetId, variableId, timeIndex);
+  return pngCache.get(JSON.stringify([datasetId, variableId, timeIndex, revision]), () => pngQueue.run(async () => {
+    const dataset = await datasetForGrid(datasetId);
+    const current = await describeDatasetSource(dataset);
+    if (current.revision !== revision) throw new Error("Unknown metadata revision; reload the catalog");
+    const metadata = current.metadata;
+    const grid = await getGrid(dataset, variableId, timeIndex);
     const expectedVariable = metadata.variables.find((entry) => entry.id === variableId);
     if (JSON.stringify(grid.variable) !== JSON.stringify(expectedVariable)) {
       throw new Error("Unsupported variable metadata");
@@ -376,7 +410,6 @@ export function getGridPng(
     if (JSON.stringify({ shape: grid.shape, lats: grid.lats, lons: grid.lons }) !== JSON.stringify(metadata.grid)) {
       throw new Error("Unsupported dataset grid");
     }
-    const pixels = Uint8Array.from(grid.values, (value) => quantize(value, grid.variable.encoding));
-    return encodeGrayscalePng(grid.shape[1], grid.shape[0], pixels);
-  });
+    return encodeGrayscalePng(grid.shape[1], grid.shape[0], grid.pixels);
+  }));
 }

@@ -20,3 +20,15 @@ export class AsyncCache<T> {
     return promise;
   }
 }
+
+// Distinct cold PNG requests must not multiply the decoder's working memory.
+// Rejections release the queue too; cached requests bypass it entirely.
+export class SerialQueue {
+  private tail: Promise<unknown> = Promise.resolve();
+
+  run<T>(create: () => Promise<T>): Promise<T> {
+    const result = this.tail.then(create);
+    this.tail = result.catch(() => {});
+    return result;
+  }
+}

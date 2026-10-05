@@ -78,9 +78,12 @@ export function startFixture({ forecastMesh = false } = {}) {
     }
     const object = objects.get(key);
     const bytes = typeof object === "function" ? object() : object;
-    return bytes ? new Response(Uint8Array.from(bytes)) : new Response("Not found", { status: 404 });
+    return bytes ? new Response(Uint8Array.from(bytes)) : new Response(
+      "<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error>",
+      { status: 404, headers: { "Content-Type": "application/xml" } },
+    );
   } });
-  return { server, requests };
+  return { server, requests, objects };
 }
 
 export async function startApp(s3Endpoint: string) {
