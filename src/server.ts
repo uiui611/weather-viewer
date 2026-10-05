@@ -1,16 +1,14 @@
 import indexPage from "../web/index.html";
 import mapPage from "../web/map.html";
-import { getCatalog, getGrid, storageConfig } from "./zarr";
+import { getCatalogResponse, getGridPng, getSourceMetadata } from "./zarr";
+import { CATALOG_CACHE_CONTROL, IMMUTABLE_CACHE_CONTROL } from "./protocol";
 
 const port = Number(process.env.PORT ?? 3000);
 const configuredBase = process.env.APP_BASE_PATH ?? "/weather-viewer";
 const base = `/${configuredBase.replace(/^\/+|\/+$/g, "")}`;
 
-function json(data: unknown, status = 200): Response {
-  return Response.json(data, {
-    status,
-    headers: { "Cache-Control": "no-store" },
-  });
+function json(data: unknown, status = 200, cacheControl = "no-store"): Response {
+  return Response.json(data, { status, headers: { "Cache-Control": cacheControl } });
 }
 
 function errorResponse(error: unknown): Response {
@@ -29,30 +27,38 @@ const server = Bun.serve({
     [`${base}/api/catalog`]: {
       async GET() {
         try {
-          return json({
-            datasets: await getCatalog(),
-            storage: storageConfig,
-          });
-        } catch (error) {
-          return errorResponse(error);
-        }
+          return json(await getCatalogResponse(), 200, CATALOG_CACHE_CONTROL);
+        } catch (error) { return errorResponse(error); }
       },
     },
-    [`${base}/api/grid`]: {
+    [`${base}/api/metadata`]: {
+      async GET(request: Request) {
+        try {
+          const url = new URL(request.url);
+          const collection = url.searchParams.get("collection") ?? "";
+          const revision = url.searchParams.get("revision") ?? "";
+          if (!/^[a-f0-9]{64}$/.test(revision)) return json({ error: "Invalid metadata revision" }, 400);
+          return json(await getSourceMetadata(collection, revision), 200, IMMUTABLE_CACHE_CONTROL);
+        } catch (error) { return errorResponse(error); }
+      },
+    },
+    [`${base}/api/grid.png`]: {
       async GET(request: Request) {
         try {
           const url = new URL(request.url);
           const dataset = url.searchParams.get("dataset") ?? "";
           const variable = url.searchParams.get("variable") ?? "";
-          const time = Number(url.searchParams.get("time") ?? 0);
-          const stride = Math.min(8, Math.max(1, Number(url.searchParams.get("stride") ?? 2)));
-          if (!Number.isInteger(time) || !Number.isInteger(stride)) {
-            return json({ error: "time and stride must be integers" }, 400);
+          const rawTime = url.searchParams.get("time") ?? "";
+          const time = Number(rawTime);
+          const revision = url.searchParams.get("revision") ?? "";
+          if (!/^\d+$/.test(rawTime) || !Number.isSafeInteger(time) ||
+              !/^[a-f0-9]{64}$/.test(revision) || url.searchParams.has("stride")) {
+            return json({ error: "Invalid time/revision; stride is not supported" }, 400);
           }
-          return json(await getGrid(dataset, variable, time, stride));
-        } catch (error) {
-          return errorResponse(error);
-        }
+          return new Response(Uint8Array.from(await getGridPng(dataset, variable, time, revision)), {
+            headers: { "Content-Type": "image/png", "Cache-Control": IMMUTABLE_CACHE_CONTROL },
+          });
+        } catch (error) { return errorResponse(error); }
       },
     },
     [`${base}/healthz`]: () => json({ status: "ok" }),
@@ -61,10 +67,7 @@ const server = Bun.serve({
         headers: { "Cache-Control": "public, max-age=86400", "Content-Type": "image/png" },
       }),
   },
-  fetch(request) {
-    const url = new URL(request.url);
-    return new Response("Not Found", { status: 404 });
-  },
+  fetch() { return new Response("Not Found", { status: 404 }); },
 });
 
 console.log(`Weather Zarr Viewer listening on ${server.url.origin}${base}/`);

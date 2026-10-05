@@ -2,30 +2,12 @@ import L, { type LeafletMouseEvent, type Map as LeafletMap } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./styles.css";
 
-interface VariableInfo {
-  id: string;
-  label: string;
-  longName: string;
-  sourceUnits: string;
-  displayUnits: string;
-  level: string;
-  statistic: string;
-  palette: string;
-  domain: [number, number];
-}
+import {
+  parseSourceMetadata, type VariableInfo, type CatalogDataset, type SourceMetadata,
+} from "../src/protocol";
+import { decodeGridPng, parseCatalog, responseError } from "./grid";
 
-interface DatasetInfo {
-  id: string;
-  root: string;
-  collection: string;
-  cycle: string;
-  title: string;
-  source: string;
-  bytes: number;
-  modified: string;
-  variables: VariableInfo[];
-  times: Array<{ index: number; forecastHour: number; validTime: string }>;
-}
+type DatasetInfo = CatalogDataset & { variables: VariableInfo[] };
 
 interface GridData {
   dataset: Pick<DatasetInfo, "id" | "cycle" | "title">;
@@ -36,7 +18,6 @@ interface GridData {
   lons: number[];
   values: Array<number | null>;
   shape: [number, number];
-  stride: number;
 }
 
 const $ = <T extends HTMLElement>(selector: string): T => {
@@ -72,8 +53,10 @@ const PALETTES: Record<string, Array<[number, string]>> = {
 };
 
 let datasets: DatasetInfo[] = [];
-let grid: GridData | undefined;
 let requestSerial = 0;
+let gridRequest: AbortController | undefined;
+const sourceMetadata = new Map<string, { revision: string; metadata: SourceMetadata }>();
+const gridCache = new Map<string, GridData>();
 
 const map = L.map("map", {
   center: [36.2, 137.2],
@@ -142,6 +125,7 @@ class WeatherCanvasLayer extends L.Layer {
   private canvas?: HTMLCanvasElement;
   private map?: LeafletMap;
   private data?: GridData;
+  private colors = new Map<number, string>();
 
   onAdd(mapInstance: LeafletMap): this {
     this.map = mapInstance;
@@ -160,7 +144,19 @@ class WeatherCanvasLayer extends L.Layer {
 
   setData(data: GridData): void {
     this.data = data;
+    this.colors.clear();
+    for (const value of data.values) {
+      if (value !== null && !this.colors.has(value)) {
+        this.colors.set(value, interpolateColor(data.variable.palette, normalize(value, data.variable)));
+      }
+    }
     this.draw();
+  }
+
+  clearData(): void {
+    this.data = undefined;
+    this.draw();
+    $("#cursor-value").textContent = "—";
   }
 
   sample(lat: number, lon: number): number | null | undefined {
@@ -192,17 +188,21 @@ class WeatherCanvasLayer extends L.Layer {
     context.globalAlpha = 0.7;
     const latEdges = edges(this.data.lats);
     const lonEdges = edges(this.data.lons);
+    // Web Mercator x depends only on longitude and y only on latitude.
+    // Project shared cell edges once, even at the full native grid density.
+    const xs = lonEdges.map((lon) => Math.round(this.map!.latLngToContainerPoint([this.data!.lats[0]!, lon]).x));
+    const ys = latEdges.map((lat) => Math.round(this.map!.latLngToContainerPoint([lat, this.data!.lons[0]!]).y));
     const width = this.data.shape[1];
     for (let row = 0; row < this.data.shape[0]; row += 1) {
       for (let column = 0; column < width; column += 1) {
         const value = this.data.values[row * width + column];
         if (value === null || value === undefined) continue;
-        const a = this.map.latLngToContainerPoint([latEdges[row]!, lonEdges[column]!]);
-        const b = this.map.latLngToContainerPoint([latEdges[row + 1]!, lonEdges[column + 1]!]);
-        const x = Math.min(a.x, b.x);
-        const y = Math.min(a.y, b.y);
-        context.fillStyle = interpolateColor(this.data.variable.palette, normalize(value, this.data.variable));
-        context.fillRect(Math.floor(x), Math.floor(y), Math.ceil(Math.abs(b.x - a.x)) + 1, Math.ceil(Math.abs(b.y - a.y)) + 1);
+        const x = Math.min(xs[column]!, xs[column + 1]!);
+        const y = Math.min(ys[row]!, ys[row + 1]!);
+        context.fillStyle = this.colors.get(value)!;
+        // Shared rounded edges avoid gaps and overlapping semi-transparent borders.
+        context.fillRect(x, y, Math.abs(xs[column + 1]! - xs[column]!),
+          Math.abs(ys[row + 1]! - ys[row]!));
       }
     }
   }
@@ -287,8 +287,8 @@ function selectionUrl(): URL {
   return url;
 }
 
-function replaceSelectionUrl(): void {
-  window.location.replace(selectionUrl());
+function updateSelectionUrl(): void {
+  window.history.replaceState(null, "", selectionUrl());
 }
 
 function selectVariableByShortcut(key: string): boolean {
@@ -297,7 +297,8 @@ function selectVariableByShortcut(key: string): boolean {
   const variable = selectedDataset().variables[index];
   if (!variable) return false;
   variableSelect.value = variable.id;
-  replaceSelectionUrl();
+  updateSelectionUrl();
+  void loadGrid();
   return true;
 }
 
@@ -358,26 +359,41 @@ function updateLegend(variable: VariableInfo): void {
 
 async function loadGrid(): Promise<void> {
   const serial = ++requestSerial;
+  gridRequest?.abort();
+  const controller = new AbortController();
+  gridRequest = controller;
   const dataset = selectedDataset();
   const variable = dataset.variables.find((entry) => entry.id === variableSelect.value);
   if (!variable) return;
   updateTimeLabels();
   updateLegend(variable);
+  weatherLayer.clearData();
   loading.hidden = false;
   errorCard.hidden = true;
   try {
+    const source = sourceMetadata.get(dataset.collection);
+    if (!source) throw new Error("データ系列のメタデータがありません");
     const params = new URLSearchParams({
-      dataset: dataset.id,
-      variable: variable.id,
-      time: timeRange.value,
-      stride: "2",
+      dataset: dataset.id, variable: variable.id, time: timeRange.value, revision: source.revision,
     });
-    const response = await fetch(`${basePath}/api/grid?${params}`);
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
-    if (serial !== requestSerial) return;
-    grid = payload as GridData;
-    weatherLayer.setData(grid);
+    const url = `${basePath}/api/grid.png?${params}`;
+    let grid = gridCache.get(url);
+    if (grid) {
+      gridCache.delete(url);
+      gridCache.set(url, grid);
+    } else {
+      const response = await fetch(url, { signal: controller.signal });
+      const values = await decodeGridPng(response, source.metadata.grid.shape, variable.encoding);
+      if (serial !== requestSerial) return;
+      grid = {
+        dataset, variable, time: dataset.times[Number(timeRange.value)]!,
+        bounds: { south: 20, west: 118, north: 50, east: 155 },
+        ...source.metadata.grid, values,
+      };
+      gridCache.set(url, grid);
+      while (gridCache.size > 128) gridCache.delete(gridCache.keys().next().value!);
+    }
+    if (serial === requestSerial) weatherLayer.setData(grid);
   } catch (error) {
     if (serial !== requestSerial) return;
     errorCard.textContent = error instanceof Error ? error.message : "データを表示できませんでした";
@@ -390,9 +406,25 @@ async function loadGrid(): Promise<void> {
 async function initialize(): Promise<void> {
   try {
     const response = await fetch(`${basePath}/api/catalog`);
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
-    datasets = payload.datasets as DatasetInfo[];
+    if (!response.ok) throw await responseError(response);
+    const catalog = parseCatalog(await response.json());
+    // Fetch one document per source, containing every element and shared grid.
+    // Variable/time/cycle switches reuse these documents without new requests.
+    await Promise.all(catalog.sources.map(async ({ collection, revision }) => {
+      const params = new URLSearchParams({ collection, revision });
+      const response = await fetch(`${basePath}/api/metadata?${params}`);
+      if (!response.ok) throw await responseError(response);
+      const metadata = parseSourceMetadata(await response.json(), collection);
+      sourceMetadata.set(collection, { revision, metadata });
+    }));
+    datasets = catalog.datasets.map((dataset) => ({
+      ...dataset,
+      variables: dataset.variableIds.map((id) => {
+        const variable = sourceMetadata.get(dataset.collection)?.metadata.variables.find((v) => v.id === id);
+        if (!variable) throw new Error("Unsupported dataset variable");
+        return variable;
+      }),
+    }));
     if (!datasets.length) throw new Error("表示できる Zarr データがありません");
     const collections = [...new Set(datasets.map((dataset) => dataset.collection))];
     collectionSelect.replaceChildren(
@@ -421,13 +453,19 @@ async function initialize(): Promise<void> {
 }
 
 collectionSelect.addEventListener("change", () => {
-  replaceSelectionUrl();
+  populateDatasets();
+  populateVariables();
+  updateSelectionUrl();
+  void loadGrid();
 });
 datasetSelect.addEventListener("change", () => {
   populateVariables();
   void loadGrid();
 });
-variableSelect.addEventListener("change", replaceSelectionUrl);
+variableSelect.addEventListener("change", () => {
+  updateSelectionUrl();
+  void loadGrid();
+});
 timeRange.addEventListener("input", updateTimeLabels);
 timeRange.addEventListener("change", () => void loadGrid());
 timePrev.addEventListener("click", () => stepForecastTime(-1));
@@ -457,7 +495,7 @@ document.addEventListener("keydown", (event) => {
 map.on("mousemove", (event: LeafletMouseEvent) => {
   $("#cursor-position").textContent = `${event.latlng.lat.toFixed(2)}°N, ${event.latlng.lng.toFixed(2)}°E`;
   const value = weatherLayer.sample(event.latlng.lat, event.latlng.lng);
-  $("#cursor-value").textContent = value === undefined || value === null ? "—" : value.toFixed(1);
+  $("#cursor-value").textContent = value === undefined || value === null ? "—" : String(value);
 });
 map.on("mouseout", () => {
   $("#cursor-position").textContent = "地図上にカーソルを移動";
