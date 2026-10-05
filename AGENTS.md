@@ -21,7 +21,10 @@ RustFS の `weather` バケットに保存された NOAA/NCEP GFS 0.25° Zarr v2
 主要ファイル:
 
 - `src/server.ts`: HTTPルーティング、API、ヘルスチェック、静的画面配信
-- `src/zarr.ts`: S3列挙、Zarrメタデータ/チャンク読取、デコード、日本域抽出
+- `src/zarr.ts`: S3列挙、Zarrメタデータ/チャンク読取、デコード、日本域抽出、系列メタデータとPNGキャッシュ
+- `src/protocol.ts`: version 1の型、量子化設定、未知のメタデータの拒否
+- `src/png.ts`: node:zlibを使った不透明8bitグレースケールPNGエンコーダー
+- `web/grid.ts`: カタログ検証、ブラウザ標準APIによるPNGデコード
 - `web/app.ts`: Leaflet地図、Canvas気象レイヤー、操作UI
 - `web/index.html`, `web/styles.css`: 画面構造とスタイル
 - `weather-viewer.yaml`: ConfigMap、Deployment、NodePort Service
@@ -69,8 +72,10 @@ GFS は緯度・経度の規則格子で、地理院タイルは Web Mercator �
 `web/app.ts` の `WeatherCanvasLayer` は、各格子セルの緯度・経度境界をLeafletの
 `latLngToContainerPoint`で画面座標へ変換してから描画します。この再投影処理を維持してください。
 
-表示範囲は20–50°N、118–155°Eです。APIは既定で2格子ごと、すなわち約0.5°間隔に
-間引き、61×75点を返します。
+表示範囲は20–50°N、118–155°Eです。間引きは行わず、0.25°間隔の121×149点を
+幅149×高さ121のグレースケールPNGで返します。北→南、西→東の向きと、全セルの投影を維持してください。
+PNGをそのまま長方形の画像レイヤーとして地図へ引き伸ばさないでください。
+要素や系列の変更では `history.replaceState` を使い、ページを再読み込みしません。
 
 背景地図は以下の標準地図タイルです。
 
@@ -97,6 +102,7 @@ Secretやアクセスキーをリポジトリへ保存しないでください�
 
 ```sh
 bun install --frozen-lockfile
+bun test
 bun run check
 bun run build
 docker build -t weather-zarr-viewer:0.1.4 .
@@ -121,7 +127,9 @@ http://localhost:3000/weather-viewer/api/catalog
 ```
 
 最低限、カタログに `noaa-gfs/YYYYMMDDHH.zarr` が現れることと、最新サイクルの
-`air_temperature_2m`について `/api/grid` が61×75点を返すことを確認してください。
+`air_temperature_2m`について、カタログのrevisionを指定した `/api/metadata` が系列の全要素と
+121×149点の座標を返すこと、`/api/grid.png` が幅149×高さ121の8bitグレースケールPNGを返すことを確認してください。
+実データの認証・ネットワークが利用できない環境では `bun test` の模擬S3で検証し、実データ未検証をPRへ明記してください。
 
 ## ビルドとデプロイ
 
@@ -191,7 +199,11 @@ Nginxの `proxy_pass` は末尾に `/` を付けず、`/weather-viewer/` prefix�
 - 対応dtypeは `<f4`、`<i4`、`<i8`です。
 - 圧縮配列はBloscのみ対応します。現在のZstandard/LZ4は読めます。
 - `forecast_hour`、`valid_time`、`latitude`、`longitude`は1チャンクである前提です。
-- カタログは60秒キャッシュします。
+- 新サイクルが追加されるカタログは5分キャッシュします。
+- メタデータは各系列に1つのJSONで、要素切り替えによる再取得は禁止です。内容のSHA-256 revisionをURLへ指定します。
+- PNGとメタデータはHTTPで1年間のprivate immutableキャッシュ、エラーはno-storeです。同一Zarrパスの上書きは想定しません。
+- PNGは物理量のMath.floor→クランプ→offset減算で符号化し、255を欠測に予約します。範囲はsrc/protocol.tsとREADME.mdにあります。
+- 生成PNGは256件、メタデータ生成結果は64件、ブラウザの復元済み格子は128件まで保持します。時間による失効はありません。
 - 圧縮オブジェクトはプロセス内で最大40件キャッシュします。3 replicas間では共有されません。
 - ヘルスチェックはプロセス生存確認であり、RustFS疎通までは確認しません。
 - 国土地理院タイルは利用者のブラウザから直接取得するため、ブラウザから

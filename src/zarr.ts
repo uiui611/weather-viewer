@@ -5,6 +5,14 @@ import {
   type _Object,
 } from "@aws-sdk/client-s3";
 import { Blosc } from "numcodecs";
+import { createHash } from "node:crypto";
+import { AsyncCache } from "./cache";
+import { encodeGrayscalePng } from "./png";
+import {
+  TRANSPORT_VERSION, MISSING_VALUE, VARIABLE_PRESENTATION, quantize, validateGrid,
+  type VariableInfo, type DatasetInfo, type SourceMetadata, type Catalog,
+} from "./protocol";
+export type { VariableInfo, DatasetInfo } from "./protocol";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -24,46 +32,12 @@ interface ConsolidatedMetadata {
   zarr_consolidated_format: number;
 }
 
-export interface VariableInfo {
-  id: string;
-  label: string;
-  longName: string;
-  sourceUnits: string;
-  displayUnits: string;
-  level: string;
-  statistic: string;
-  palette: string;
-  domain: [number, number];
-}
-
-export interface DatasetInfo {
-  id: string;
-  root: string;
-  collection: string;
-  cycle: string;
-  title: string;
-  source: string;
-  bytes: number;
-  modified: string;
-  variables: VariableInfo[];
-  times: Array<{ index: number; forecastHour: number; validTime: string }>;
-}
-
-export interface GridResponse {
-  dataset: Pick<DatasetInfo, "id" | "cycle" | "title">;
+interface GridResponse {
   variable: VariableInfo;
-  time: DatasetInfo["times"][number];
-  bounds: { south: number; west: number; north: number; east: number };
   lats: number[];
   lons: number[];
   values: Array<number | null>;
   shape: [number, number];
-  stride: number;
-  projection: {
-    data: string;
-    map: string;
-    method: string;
-  };
 }
 
 const BUCKET = process.env.S3_BUCKET ?? "weather";
@@ -84,19 +58,6 @@ const s3 = new S3Client({
 const metadataCache = new Map<string, ConsolidatedMetadata>();
 const byteCache = new Map<string, Uint8Array>();
 let catalogCache: { expires: number; datasets: DatasetInfo[] } | undefined;
-
-const VARIABLE_PRESENTATION: Record<
-  string,
-  Pick<VariableInfo, "displayUnits" | "palette" | "domain">
-> = {
-  air_temperature_2m: { displayUnits: "°C", palette: "temperature", domain: [-20, 40] },
-  cloud_area_fraction: { displayUnits: "%", palette: "cloud", domain: [0, 100] },
-  eastward_wind_10m: { displayUnits: "m/s", palette: "wind", domain: [-30, 30] },
-  mean_sea_level_pressure: { displayUnits: "hPa", palette: "pressure", domain: [990, 1020] },
-  northward_wind_10m: { displayUnits: "m/s", palette: "wind", domain: [-30, 30] },
-  precipitation_amount: { displayUnits: "mm", palette: "precipitation", domain: [0, 50] },
-  relative_humidity_2m: { displayUnits: "%", palette: "humidity", domain: [0, 100] },
-};
 
 function asArrayMetadata(value: JsonRecord): ZarrArrayMetadata {
   return value as unknown as ZarrArrayMetadata;
@@ -165,7 +126,7 @@ async function readVector(root: string, name: string): Promise<number[]> {
 }
 
 function variableInfo(name: string, attrs: JsonRecord): VariableInfo | undefined {
-  const presentation = VARIABLE_PRESENTATION[name];
+  const presentation = Object.hasOwn(VARIABLE_PRESENTATION, name) ? VARIABLE_PRESENTATION[name] : undefined;
   if (!presentation) return undefined;
   return {
     id: name,
@@ -255,15 +216,14 @@ export async function getCatalog(force = false): Promise<DatasetInfo[]> {
   datasets.sort((a, b) =>
     a.collection.localeCompare(b.collection) || b.cycle.localeCompare(a.cycle),
   );
-  catalogCache = { expires: Date.now() + 60_000, datasets };
+  catalogCache = { expires: Date.now() + 300_000, datasets };
   return datasets;
 }
 
-export async function getGrid(
+async function getGrid(
   datasetId: string,
   variableId: string,
   timeIndex: number,
-  stride: number,
 ): Promise<GridResponse> {
   const catalog = await getCatalog();
   const dataset = catalog.find((entry) => entry.id === datasetId);
@@ -283,13 +243,19 @@ export async function getGrid(
   ]);
   const latIndices = allLats
     .map((value, index) => ({ value, index }))
-    .filter(({ value }) => value >= JAPAN_BOUNDS.south && value <= JAPAN_BOUNDS.north)
-    .filter((_, index) => index % stride === 0);
+    .filter(({ value }) => value >= JAPAN_BOUNDS.south && value <= JAPAN_BOUNDS.north);
   const lonIndices = allLons
     .map((raw, index) => ({ value: raw > 180 ? raw - 360 : raw, index }))
-    .filter(({ value }) => value >= JAPAN_BOUNDS.west && value <= JAPAN_BOUNDS.east)
-    .filter((_, index) => index % stride === 0);
+    .filter(({ value }) => value >= JAPAN_BOUNDS.west && value <= JAPAN_BOUNDS.east);
 
+  if (array.zarr_format !== 2 || array.order !== "C" || array.shape.length !== 3 ||
+      array.chunks.length !== 3 || !array.chunks.every((n) => Number.isInteger(n) && n > 0) ||
+      array.shape[0] !== dataset.times.length || array.shape[1] !== allLats.length ||
+      array.shape[2] !== allLons.length) throw new Error("Unsupported weather array layout");
+  validateGrid({
+    shape: [latIndices.length, lonIndices.length],
+    lats: latIndices.map(({ value }) => value), lons: lonIndices.map(({ value }) => value),
+  });
   const chunks = new Map<string, { values: number[]; shape: number[] }>();
   async function chunkFor(latIndex: number, lonIndex: number) {
     const coords = [
@@ -299,13 +265,13 @@ export async function getGrid(
     ];
     const key = coords.join(".");
     if (!chunks.has(key)) {
-      const shape = coords.map((coord, axis) =>
-        Math.min(array.chunks[axis]!, array.shape[axis]! - coord * array.chunks[axis]!),
-      );
-      chunks.set(key, {
-        values: typedNumbers(await decodeChunk(datasetRoot, selectedVariableId, coords), array.dtype),
-        shape,
-      });
+      // Zarr v2 edge chunks are padded to the declared chunk shape, not the
+      // remaining array extent. Use the declared strides for pixel offsets.
+      const values = typedNumbers(await decodeChunk(datasetRoot, selectedVariableId, coords), array.dtype);
+      if (values.length !== array.chunks.reduce((a, b) => a * b, 1)) {
+        throw new Error("Unsupported weather chunk size");
+      }
+      chunks.set(key, { values, shape: array.chunks });
     }
     return { chunk: chunks.get(key)!, coords };
   }
@@ -319,30 +285,96 @@ export async function getGrid(
       const localLon = lon.index - coords[2]! * array.chunks[2]!;
       const offset = (localTime * chunk.shape[1]! + localLat) * chunk.shape[2]! + localLon;
       const raw = chunk.values[offset];
-      values.push(raw === undefined || Number.isNaN(raw) ? null : transformValue(variable.id, raw));
+      const fill = array.fill_value;
+      values.push(raw === undefined || !Number.isFinite(raw) ||
+        (typeof fill === "number" && raw === fill) ? null : transformValue(variable.id, raw));
     }
   }
 
   return {
-    dataset: { id: dataset.id, cycle: dataset.cycle, title: dataset.title },
     variable,
-    time,
-    bounds: JAPAN_BOUNDS,
     lats: latIndices.map(({ value }) => value),
     lons: lonIndices.map(({ value }) => value),
     values,
     shape: [latIndices.length, lonIndices.length],
-    stride,
-    projection: {
-      data: "Geographic latitude/longitude grid (GFS 0.25 degree)",
-      map: "Web Mercator tiles (GSI Maps)",
-      method: "Each grid-cell corner is projected from latitude/longitude by Leaflet before drawing.",
-    },
   };
 }
 
-export const storageConfig = {
-  bucket: BUCKET,
-  prefixes: PREFIXES,
-  bounds: JAPAN_BOUNDS,
-};
+const sourceCache = new AsyncCache<{ revision: string; metadata: SourceMetadata }>(64);
+const sourceDocuments = new Map<string, SourceMetadata>();
+const pngCache = new AsyncCache<Buffer>(256);
+
+async function describeSource(collection: string): Promise<{ revision: string; metadata: SourceMetadata }> {
+  const catalog = await getCatalog();
+  const dataset = catalog.find((entry) => entry.collection === collection);
+  if (!dataset) throw new Error("Unknown collection");
+  return sourceCache.get(JSON.stringify([collection, dataset.id]), async () => {
+    const [allLats, allLons] = await Promise.all([
+      readVector(dataset.root, "latitude"), readVector(dataset.root, "longitude"),
+    ]);
+    const lats = allLats.filter((lat) => lat >= JAPAN_BOUNDS.south && lat <= JAPAN_BOUNDS.north);
+    const lons = allLons.map((lon) => lon > 180 ? lon - 360 : lon)
+      .filter((lon) => lon >= JAPAN_BOUNDS.west && lon <= JAPAN_BOUNDS.east);
+    const metadata: SourceMetadata = {
+      version: TRANSPORT_VERSION, collection, format: "png-grayscale-8",
+      missingValue: MISSING_VALUE, rounding: "floor",
+      grid: { shape: [lats.length, lons.length], lats, lons },
+      variables: dataset.variables,
+    };
+    validateGrid(metadata.grid);
+    const revision = createHash("sha256").update(JSON.stringify(metadata)).digest("hex");
+    sourceDocuments.set(JSON.stringify([collection, revision]), metadata);
+    while (sourceDocuments.size > 64) sourceDocuments.delete(sourceDocuments.keys().next().value!);
+    return { revision, metadata };
+  });
+}
+
+export async function getCatalogResponse(): Promise<Catalog> {
+  const datasets = await getCatalog();
+  const collections = [...new Set(datasets.map((dataset) => dataset.collection))];
+  const sources = await Promise.all(collections.map(async (collection) => {
+    const { revision, metadata } = await describeSource(collection);
+    for (const dataset of datasets.filter((entry) => entry.collection === collection)) {
+      for (const variable of dataset.variables) {
+        if (JSON.stringify(variable) !== JSON.stringify(metadata.variables.find((entry) => entry.id === variable.id))) {
+          throw new Error(`Unsupported variable metadata in ${dataset.id}`);
+        }
+      }
+    }
+    return { collection, revision };
+  }));
+  return {
+    version: TRANSPORT_VERSION, sources,
+    datasets: datasets.map(({ variables, root: _root, ...dataset }) => ({
+      ...dataset, variableIds: variables.map((variable) => variable.id),
+    })),
+  };
+}
+
+export async function getSourceMetadata(collection: string, revision: string): Promise<SourceMetadata> {
+  const cached = sourceDocuments.get(JSON.stringify([collection, revision]));
+  if (cached) return cached;
+  const current = await describeSource(collection);
+  if (current.revision !== revision) throw new Error("Unknown metadata revision; reload the catalog");
+  return current.metadata;
+}
+
+export function getGridPng(
+  datasetId: string, variableId: string, timeIndex: number, revision: string,
+): Promise<Buffer> {
+  return pngCache.get(JSON.stringify([datasetId, variableId, timeIndex, revision]), async () => {
+    const dataset = (await getCatalog()).find((entry) => entry.id === datasetId);
+    if (!dataset) throw new Error("Unknown dataset");
+    const metadata = await getSourceMetadata(dataset.collection, revision);
+    const grid = await getGrid(datasetId, variableId, timeIndex);
+    const expectedVariable = metadata.variables.find((entry) => entry.id === variableId);
+    if (JSON.stringify(grid.variable) !== JSON.stringify(expectedVariable)) {
+      throw new Error("Unsupported variable metadata");
+    }
+    if (JSON.stringify({ shape: grid.shape, lats: grid.lats, lons: grid.lons }) !== JSON.stringify(metadata.grid)) {
+      throw new Error("Unsupported dataset grid");
+    }
+    const pixels = Uint8Array.from(grid.values, (value) => quantize(value, grid.variable.encoding));
+    return encodeGrayscalePng(grid.shape[1], grid.shape[0], pixels);
+  });
+}
