@@ -110,6 +110,8 @@ function typedNumbers(bytes: Uint8Array, dtype: string): number[] {
   switch (dtype) {
     case "<f4":
       return Array.from(new Float32Array(buffer));
+    case "<f8":
+      return Array.from(new Float64Array(buffer));
     case "<i4":
       return Array.from(new Int32Array(buffer));
     case "<i8":
