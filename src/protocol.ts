@@ -96,12 +96,22 @@ export function quantize(value: number | null, encoding: Encoding): number {
 
 export function validateGrid(grid: SourceMetadata["grid"]): void {
   if (!grid || !Array.isArray(grid.shape) || grid.shape.length !== 2 ||
-      grid.shape[0] !== 121 || grid.shape[1] !== 149 ||
       !Array.isArray(grid.lats) || !Array.isArray(grid.lons) ||
-      grid.lats.length !== 121 || grid.lons.length !== 149 ||
-      !grid.lats.every((lat, i) => lat === 50 - i * 0.25) ||
-      !grid.lons.every((lon, i) => lon === 118 + i * 0.25)) {
-    throw new Error("Unsupported grid: expected north-to-south GFS 0.25° Japan grid (121×149)");
+      grid.lats.length !== grid.shape[0] || grid.lons.length !== grid.shape[1]) {
+    throw new Error("Unsupported grid dimensions");
+  }
+  // Both collections preserve their native cell centers and density. Mesh3
+  // coordinates use float64; allow only floating-point rounding differences.
+  const layouts = [
+    { rows: 121, columns: 149, north: 50, west: 118, latStep: 0.25, lonStep: 0.25 },
+    { rows: 3024, columns: 2400, north: 47.6 - 1 / 240, west: 120 + 1 / 160,
+      latStep: 1 / 120, lonStep: 1 / 80 },
+  ];
+  if (!layouts.some(({ rows, columns, north, west, latStep, lonStep }) =>
+    grid.shape[0] === rows && grid.shape[1] === columns &&
+    grid.lats.every((lat, i) => Number.isFinite(lat) && Math.abs(lat - (north - i * latStep)) < 1e-9) &&
+    grid.lons.every((lon, i) => Number.isFinite(lon) && Math.abs(lon - (west + i * lonStep)) < 1e-9))) {
+    throw new Error("Unsupported grid: expected north-to-south GFS Japan or Japan mesh3 cell centers");
   }
 }
 

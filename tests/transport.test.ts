@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { inflateSync } from "node:zlib";
 import { AsyncCache } from "../src/cache";
 import { encodeGrayscalePng } from "../src/png";
-import { parseSourceMetadata, quantize, VARIABLE_PRESENTATION, type SourceMetadata } from "../src/protocol";
+import { parseSourceMetadata, quantize, validateGrid, VARIABLE_PRESENTATION, type SourceMetadata } from "../src/protocol";
 import { parseCatalog } from "../web/grid";
 
 // Independently inspect the wire format (including CRC and Sub unfiltering).
@@ -45,6 +45,25 @@ export function readPng(png: Uint8Array) {
 }
 
 describe("integer transport", () => {
+  test("mesh3 validation preserves cell centers, density and orientation", () => {
+    const grid: SourceMetadata["grid"] = {
+      shape: [3024, 2400],
+      lats: Array.from({ length: 3024 }, (_, i) => 47.6 - (i + 0.5) / 120),
+      lons: Array.from({ length: 2400 }, (_, i) => 120 + (i + 0.5) / 80),
+    };
+    expect(() => validateGrid(grid)).not.toThrow();
+    for (const invalid of [
+      { ...grid, shape: [2400, 3024] },
+      { ...grid, lats: grid.lats.slice(1) },
+      { ...grid, lats: [...grid.lats].reverse() },
+      { ...grid, lons: [...grid.lons].reverse() },
+      { ...grid, lats: grid.lats.map(Math.fround) },
+      { ...grid, lats: grid.lats.map((lat) => lat + 1 / 240) },
+      { ...grid, lons: grid.lons.map((lon, i) => i === 10 ? NaN : lon) },
+      { ...grid, lons: grid.lons.map((lon, i) => i === 10 ? Infinity : lon) },
+    ]) expect(() => validateGrid(invalid as SourceMetadata["grid"])).toThrow();
+  });
+
   test("floors physical units, including negative values; reserves 255", () => {
     const temp = VARIABLE_PRESENTATION.air_temperature_2m!.encoding;
     expect(quantize(-1.2, temp)).toBe(78); // -2°C, not -1°C

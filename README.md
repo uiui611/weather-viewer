@@ -1,7 +1,7 @@
 # GPV Weather Atlas
 
 RustFS の `weather/noaa-gfs/YYYYMMDDHH.zarr` と `weather/forecast/YYYYMMDDHH.zarr` に
-保存された NOAA/NCEP GFS 0.25° Zarr v2 を、
+保存された NOAA/NCEP GFS 0.25° および日本第3次メッシュの Zarr v2 を、
 日本周辺の国土地理院地図上に表示する Bun + TypeScript アプリです。
 
 ## 表示方法と投影
@@ -9,7 +9,9 @@ RustFS の `weather/noaa-gfs/YYYYMMDDHH.zarr` と `weather/forecast/YYYYMMDDHH.z
 GFS は緯度・経度による規則格子ですが、地理院タイルは Web Mercator です。
 本アプリは Zarr の格子を単純な画像として重ねず、各格子セルの緯度・経度境界を
 Leaflet の地図座標へ変換してから Canvas に描画します。表示範囲は 20–50°N、
-118–155°E で、元データの0.25°間隔を維持し、121×149点を表示します。
+118–155°E です。`noaa-gfs` は0.25°間隔の121×149点、`forecast` は日本第3次メッシュの
+セル中心（緯度1/120°・経度1/80°間隔、3024×2400点）を元の密度で表示します。
+第3次メッシュのセル境界は22.4–47.6°N、120–150°Eです。
 通信には8bitグレースケールPNGを使用し、系列・要素の切り替えでページを再読み込みしません。
 
 左右の矢印キーで予報時刻、上下の矢印キーで同じ系列内のモデル初期時刻を変更できます。
@@ -131,7 +133,7 @@ RBAC を用意し、Deployment を GHCR の main と Always に切り替えて�
 
 - `GET /weather-viewer/api/catalog`: `_SUCCESS` があるZarrのサイクル・予報時刻・要素IDと、各系列のメタデータrevisionを列挙
 - `GET /weather-viewer/api/metadata?collection=…&revision=…`: 系列ごとに格子座標と全要素の情報をまとめたJSON
-- `GET /weather-viewer/api/grid.png?dataset=…&variable=…&time=…&revision=…`: 指定した要素・時刻の日本周辺格子をPNGで返却（幅149×高さ121）
+- `GET /weather-viewer/api/grid.png?dataset=…&variable=…&time=…&revision=…`: 指定した要素・時刻の日本周辺格子をPNGで返却（`noaa-gfs`: 幅149×高さ121、`forecast`: 幅2400×高さ3024）
 - `GET /weather-viewer/healthz`: プロセスのヘルスチェック
 
 RustFS のアクセスキーはサーバー内だけで使用され、API やブラウザには返しません。
@@ -159,6 +161,8 @@ RustFS のアクセスキーはサーバー内だけで使用され、API やブ
 1mm未満の降水は0mmとなります。PNGは不透明・8bitグレースケール・非インターレースで、
 色補正や向きのメタデータを含めません。ブラウザは未知のプロトコル、要素、量子化設定、
 格子座標、PNGのサイズ・画素形式をエラーとして扱います。
+Zarrの対応dtypeは `<f4`、`<f8`、`<i4`、`<i8` です。第3次メッシュの緯度・経度は
+float64のまま読み取り、旧GFS格子とともにサーバー・ブラウザでセル中心と向きを検証します。
 
 ### メタデータとキャッシュ
 
@@ -187,5 +191,6 @@ bun run build
 ```
 
 テストは合成データのS3互換HTTP応答を使い、系列別メタデータ、PNGのCRC・画素値、
-整数化・欠測・クランプ、原密度の格子、パディングされたZarr端チャンク、APIキャッシュ、
+整数化・欠測・クランプ、GFSとfloat64第3次メッシュの原密度の格子、48時間の予報時刻、
+パディングされたZarr端チャンク、APIキャッシュ、
 未知の入力の拒否を確認します。RustFS実データの検証を代替するものではありません。
