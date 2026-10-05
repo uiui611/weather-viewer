@@ -20,6 +20,8 @@ function errorResponse(error: unknown): Response {
 
 const server = Bun.serve({
   port,
+  // Cold PNG generation is queued to bound memory; keep waiting sockets alive.
+  idleTimeout: 60,
   routes: {
     [base]: indexPage,
     [`${base}/`]: indexPage,

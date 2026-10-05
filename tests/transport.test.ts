@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { inflateSync } from "node:zlib";
-import { AsyncCache } from "../src/cache";
+import { AsyncCache, SerialQueue } from "../src/cache";
 import { encodeGrayscalePng } from "../src/png";
 import { parseSourceMetadata, quantize, validateGrid, VARIABLE_PRESENTATION, type SourceMetadata } from "../src/protocol";
 import { parseCatalog } from "../web/grid";
@@ -105,6 +105,32 @@ describe("integer transport", () => {
 });
 
 describe("immutable bounded cache", () => {
+  test("cold generation is serialized and a failure releases the next request", async () => {
+    const queue = new SerialQueue();
+    const events: string[] = [];
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const first = queue.run(async () => {
+      events.push("first started");
+      await blocked;
+      events.push("first finished");
+      return 1;
+    });
+    const failure = queue.run(async () => {
+      events.push("failure started");
+      throw new Error("temporary storage error");
+    });
+    void failure.catch(() => {});
+    const next = queue.run(async () => { events.push("next started"); return 2; });
+    await Promise.resolve();
+    expect(events).toEqual(["first started"]);
+    release();
+    expect(await first).toBe(1);
+    await expect(failure).rejects.toThrow("temporary storage error");
+    expect(await next).toBe(2);
+    expect(events).toEqual(["first started", "first finished", "failure started", "next started"]);
+  });
+
   test("coalesces requests and retries after a failure", async () => {
     const cache = new AsyncCache<number>(2);
     let calls = 0;
