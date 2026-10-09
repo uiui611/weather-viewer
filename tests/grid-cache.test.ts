@@ -16,8 +16,12 @@ describe("browser grid cache", () => {
     expect(cache.byteLength).toBe(8);
     cache.set("d", new Uint8Array(7));
     expect(cache.get("c")).toBeUndefined();
+    expect(cache.get("a")).toBe(first);
+    expect(cache.byteLength).toBe(10);
+    cache.set("e", new Uint8Array(8));
+    expect(cache.get("d")).toBeUndefined();
     expect(cache.get("a")).toBeUndefined();
-    expect(cache.byteLength).toBe(7);
+    expect(cache.byteLength).toBe(8);
   });
 
   test("count limit, replacement accounting, and oversized entries", () => {
