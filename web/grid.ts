@@ -38,7 +38,7 @@ export async function responseError(response: Response): Promise<Error> {
 
 export async function decodeGridPng(
   response: Response, shape: [number, number], encoding: Encoding,
-): Promise<Array<number | null>> {
+): Promise<Uint8Array> {
   if (!response.ok) throw await responseError(response);
   if (response.headers.get("Content-Type")?.split(";")[0] !== "image/png") {
     throw new Error("Unsupported grid response: expected PNG");
@@ -58,16 +58,27 @@ export async function decodeGridPng(
     // Decode at native size on an opaque canvas; never resize or blend samples.
     context.drawImage(bitmap, 0, 0);
     const rgba = context.getImageData(0, 0, canvas.width, canvas.height).data;
-    const values: Array<number | null> = [];
-    for (let i = 0; i < rgba.length; i += 4) {
-      const code = rgba[i]!;
-      if (rgba[i + 1] !== code || rgba[i + 2] !== code || rgba[i + 3] !== 255 ||
-          (code !== MISSING_VALUE && (code + encoding.offset < encoding.min ||
-            code + encoding.offset > encoding.max))) {
-        throw new Error("Unsupported PNG grid pixel");
-      }
-      values.push(code === MISSING_VALUE ? null : code + encoding.offset);
-    }
-    return values;
+    return gridCodesFromRgba(rgba, encoding);
   } finally { bitmap.close(); }
+}
+
+/** Retain quantized bytes; restore physical values only when needed. */
+export function gridValue(code: number | undefined, offset: number): number | null | undefined {
+  return code === undefined ? undefined : code === MISSING_VALUE ? null : code + offset;
+}
+
+export function gridCodesFromRgba(rgba: Uint8ClampedArray, encoding: Encoding): Uint8Array {
+  if (rgba.length % 4 !== 0) throw new Error("Unsupported PNG grid pixel");
+  const codes = new Uint8Array(rgba.length / 4);
+  for (let i = 0; i < codes.length; i += 1) {
+    const pixel = i * 4;
+    const code = rgba[pixel]!;
+    if (rgba[pixel + 1] !== code || rgba[pixel + 2] !== code || rgba[pixel + 3] !== 255 ||
+        (code !== MISSING_VALUE && (code + encoding.offset < encoding.min ||
+          code + encoding.offset > encoding.max))) {
+      throw new Error("Unsupported PNG grid pixel");
+    }
+    codes[i] = code;
+  }
+  return codes;
 }

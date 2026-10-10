@@ -5,7 +5,8 @@ import "./styles.css";
 import {
   parseSourceMetadata, type VariableInfo, type CatalogDataset, type SourceMetadata,
 } from "../src/protocol";
-import { decodeGridPng, parseCatalog, responseError } from "./grid";
+import { decodeGridPng, gridValue, parseCatalog, responseError } from "./grid";
+import { ByteLruCache } from "./grid-cache";
 
 type DatasetInfo = CatalogDataset & { variables: VariableInfo[] };
 
@@ -16,7 +17,7 @@ interface GridData {
   bounds: { south: number; west: number; north: number; east: number };
   lats: number[];
   lons: number[];
-  values: Array<number | null>;
+  values: Uint8Array;
   shape: [number, number];
 }
 
@@ -56,7 +57,9 @@ let datasets: DatasetInfo[] = [];
 let requestSerial = 0;
 let gridRequest: AbortController | undefined;
 const sourceMetadata = new Map<string, { revision: string; metadata: SourceMetadata }>();
-const gridCache = new Map<string, GridData>();
+// Count coordinate arrays conservatively per entry even when metadata is shared.
+const gridCache = new ByteLruCache<GridData>(64 * 1024 * 1024, 128,
+  (grid) => grid.values.byteLength + 8 * (grid.lats.length + grid.lons.length));
 
 const map = L.map("map", {
   center: [36.2, 137.2],
@@ -145,8 +148,9 @@ class WeatherCanvasLayer extends L.Layer {
   setData(data: GridData): void {
     this.data = data;
     this.colors.clear();
-    for (const value of data.values) {
-      if (value !== null && !this.colors.has(value)) {
+    for (const code of data.values) {
+      const value = gridValue(code, data.variable.encoding.offset);
+      if (value !== null && value !== undefined && !this.colors.has(value)) {
         this.colors.set(value, interpolateColor(data.variable.palette, normalize(value, data.variable)));
       }
     }
@@ -169,7 +173,8 @@ class WeatherCanvasLayer extends L.Layer {
     if (Math.abs(this.data.lats[latIndex]! - lat) > latStep || Math.abs(this.data.lons[lonIndex]! - lon) > lonStep) {
       return undefined;
     }
-    return this.data.values[latIndex * this.data.shape[1] + lonIndex];
+    return gridValue(this.data.values[latIndex * this.data.shape[1] + lonIndex],
+      this.data.variable.encoding.offset);
   }
 
   private draw(): void {
@@ -195,7 +200,7 @@ class WeatherCanvasLayer extends L.Layer {
     const width = this.data.shape[1];
     for (let row = 0; row < this.data.shape[0]; row += 1) {
       for (let column = 0; column < width; column += 1) {
-        const value = this.data.values[row * width + column];
+        const value = gridValue(this.data.values[row * width + column], this.data.variable.encoding.offset);
         if (value === null || value === undefined) continue;
         const x = Math.min(xs[column]!, xs[column + 1]!);
         const y = Math.min(ys[row]!, ys[row + 1]!);
@@ -378,10 +383,7 @@ async function loadGrid(): Promise<void> {
     });
     const url = `${basePath}/api/grid.png?${params}`;
     let grid = gridCache.get(url);
-    if (grid) {
-      gridCache.delete(url);
-      gridCache.set(url, grid);
-    } else {
+    if (!grid) {
       const response = await fetch(url, { signal: controller.signal });
       const values = await decodeGridPng(response, source.metadata.grid.shape, variable.encoding);
       if (serial !== requestSerial) return;
@@ -391,7 +393,6 @@ async function loadGrid(): Promise<void> {
         ...source.metadata.grid, values,
       };
       gridCache.set(url, grid);
-      while (gridCache.size > 128) gridCache.delete(gridCache.keys().next().value!);
     }
     if (serial === requestSerial) weatherLayer.setData(grid);
   } catch (error) {
