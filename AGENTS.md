@@ -123,11 +123,14 @@ kubectl port-forward -n default service/rustfs 19000:9000
 `bun run dev`を起動してください。既定URLは次の通りです。
 
 ```text
-http://localhost:3000/weather-viewer
+http://localhost:3000/weather-viewer/
 http://localhost:3000/weather-viewer/map
 http://localhost:3000/weather-viewer/healthz
 http://localhost:3000/weather-viewer/api/catalog
 ```
+
+トップの末尾スラッシュなしURLは、クエリを保持してスラッシュありへ308リダイレクトします。
+`APP_BASE_PATH` 変更時もトップ内の相対リンクが同じベースパスの地図へ解決されることを維持してください。
 
 最低限、カタログに `noaa-gfs/YYYYMMDDHH.zarr` が現れることと、最新サイクルの
 `air_temperature_2m`について、カタログのrevisionを指定した `/api/metadata` が系列の全要素と

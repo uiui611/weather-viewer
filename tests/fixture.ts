@@ -86,18 +86,18 @@ export function startFixture({ forecastMesh = false } = {}) {
   return { server, requests, objects };
 }
 
-export async function startApp(s3Endpoint: string) {
+export async function startApp(s3Endpoint: string, basePath = "/weather-viewer") {
   const reservation = Bun.serve({ port: 0, fetch: () => new Response() });
   const port = reservation.port!;
   reservation.stop(true);
   const app = Bun.spawn([process.execPath, "src/server.ts"], {
     cwd: fileURLToPath(new URL("..", import.meta.url)),
-    env: { ...process.env, PORT: String(port), S3_ENDPOINT_URL: s3Endpoint,
+    env: { ...process.env, PORT: String(port), APP_BASE_PATH: basePath, S3_ENDPOINT_URL: s3Endpoint,
       S3_BUCKET: "weather", S3_PREFIXES: "noaa-gfs,forecast", AWS_REGION: "us-east-1",
       AWS_ACCESS_KEY_ID: "fixture-only", AWS_SECRET_ACCESS_KEY: "fixture-only" },
     stdout: "ignore", stderr: "pipe",
   });
-  const base = `http://127.0.0.1:${port}/weather-viewer`;
+  const base = `http://127.0.0.1:${port}/${basePath.replace(/^\/+|\/+$/g, "")}`;
   for (let attempt = 0; attempt < 100; attempt++) {
     if (await fetch(`${base}/healthz`).then((r) => r.ok).catch(() => false)) return { app, base };
     if (app.exitCode !== null) throw new Error(await new Response(app.stderr).text());
