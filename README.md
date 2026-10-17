@@ -40,8 +40,10 @@ AWS_SECRET_ACCESS_KEY=... \
 bun run dev
 ```
 
-インデックスは `http://localhost:3000/weather-viewer`、気象地図は
+インデックスは `http://localhost:3000/weather-viewer/`、気象地図は
 `http://localhost:3000/weather-viewer/map`、ヘルスチェックは `/weather-viewer/healthz` です。
+末尾スラッシュなしのトップURLは、クエリを保持してスラッシュありへリダイレクトします。
+`APP_BASE_PATH` を変更した場合も、そのベースパス直下のトップから地図へ移動できます。
 
 気象地図の選択状態は `collection`（データ系列）と `variable`（気象要素）の
 クエリパラメータへ反映されるため、そのまま共有用リンクとして利用できます。

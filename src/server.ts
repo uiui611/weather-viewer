@@ -23,7 +23,11 @@ const server = Bun.serve({
   // Cold PNG generation is queued to bound memory; keep waiting sockets alive.
   idleTimeout: 60,
   routes: {
-    [base]: indexPage,
+    [base]: (request: Request) => {
+      const url = new URL(request.url);
+      url.pathname = `${base}/`;
+      return Response.redirect(url, 308);
+    },
     [`${base}/`]: indexPage,
     [`${base}/map`]: mapPage,
     [`${base}/api/catalog`]: {
