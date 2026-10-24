@@ -1,5 +1,6 @@
 import {
   GetObjectCommand,
+  NoSuchKey,
   ListObjectsV2Command,
   S3Client,
   type _Object,
@@ -90,19 +91,26 @@ async function metadata(root: string): Promise<ConsolidatedMetadata> {
   return metadataCache.get(root)!;
 }
 
-async function decodeChunk(root: string, arrayName: string, chunk: number[]): Promise<Uint8Array> {
+async function decodeChunk(root: string, arrayName: string, chunk: number[], missingIsFill = false): Promise<Uint8Array | null> {
   const consolidated = await metadata(root);
   const array = asArrayMetadata(consolidated.metadata[`${arrayName}/.zarray`]!);
   const separator = array.dimension_separator ?? ".";
   const key = `${root}/${arrayName}/${chunk.join(separator)}`;
-  const encoded = await objectBytes(key);
-  if (!array.compressor) return encoded;
-  if (array.compressor.id !== "blosc") {
+  if (array.compressor && array.compressor.id !== "blosc") {
     throw new Error(`Unsupported Zarr compressor: ${String(array.compressor.id)}`);
   }
-  return await Blosc.fromConfig(
+  const codec = array.compressor ? Blosc.fromConfig(
     array.compressor as unknown as Parameters<typeof Blosc.fromConfig>[0],
-  ).decode(encoded);
+  ) : undefined;
+  let encoded: Uint8Array;
+  try {
+    encoded = await objectBytes(key);
+  } catch (error) {
+    // Only weather data chunks may be sparse. Metadata and coordinates remain strict.
+    if (missingIsFill && error instanceof NoSuchKey) return null;
+    throw error;
+  }
+  return codec ? await codec.decode(encoded) : encoded;
 }
 
 function typedValues(bytes: Uint8Array, dtype: string) {
@@ -124,7 +132,18 @@ function typedValues(bytes: Uint8Array, dtype: string) {
 async function readVector(root: string, name: string): Promise<number[]> {
   const consolidated = await metadata(root);
   const array = asArrayMetadata(consolidated.metadata[`${name}/.zarray`]!);
-  return Array.from(typedValues(await decodeChunk(root, name, [0]), array.dtype).subarray(0, array.shape[0]), Number);
+  const bytes = await decodeChunk(root, name, [0]);
+  if (bytes === null) throw new Error(`Missing Zarr coordinate chunk: ${name}`);
+  return Array.from(typedValues(bytes, array.dtype).subarray(0, array.shape[0]), Number);
+}
+
+function missingChunkValue(array: ZarrArrayMetadata): number {
+  const fill = array.fill_value;
+  if (typeof fill === "number" && Number.isFinite(fill)) return fill;
+  if ((array.dtype === "<f4" || array.dtype === "<f8") &&
+      (fill === "NaN" || fill === "Infinity" || fill === "-Infinity")) return Number(fill);
+  // null specifies undefined contents in Zarr v2; do not invent a value for it.
+  throw new Error("Unsupported Zarr fill_value for a missing weather chunk");
 }
 
 function variableInfo(name: string, attrs: JsonRecord): VariableInfo | undefined {
@@ -276,7 +295,8 @@ async function getGrid(
     .map((raw, index) => ({ value: raw > 180 ? raw - 360 : raw, index }))
     .filter(({ value }) => value >= JAPAN_BOUNDS.west && value <= JAPAN_BOUNDS.east);
 
-  if (array.zarr_format !== 2 || array.order !== "C" || array.shape.length !== 3 ||
+  if (!["<f4", "<f8", "<i4", "<i8"].includes(array.dtype) ||
+      array.zarr_format !== 2 || array.order !== "C" || array.shape.length !== 3 ||
       array.chunks.length !== 3 || !array.chunks.every((n) => Number.isInteger(n) && n > 0) ||
       array.shape[0] !== dataset.times.length || array.shape[1] !== allLats.length ||
       array.shape[2] !== allLons.length) throw new Error("Unsupported weather array layout");
@@ -303,14 +323,16 @@ async function getGrid(
   const chunkLength = array.chunks.reduce((a, b) => a * b, 1);
   for (const [cy, rows] of latGroups) {
     for (const [cx, columns] of lonGroups) {
-      const values = typedValues(await decodeChunk(datasetRoot, selectedVariableId, [timeChunk, cy, cx]), array.dtype);
-      if (values.length !== chunkLength) throw new Error("Unsupported weather chunk size");
+      const bytes = await decodeChunk(datasetRoot, selectedVariableId, [timeChunk, cy, cx], true);
+      const values = bytes === null ? null : typedValues(bytes, array.dtype);
+      const absentValue = values === null ? missingChunkValue(array) : 0;
+      if (values !== null && values.length !== chunkLength) throw new Error("Unsupported weather chunk size");
       for (const row of rows) {
         // Edge chunks retain the declared strides, including padded samples.
         const sourceOffset = (localTime * array.chunks[1]! + row.source) * array.chunks[2]!;
         const targetOffset = row.target * lonIndices.length;
         for (const column of columns) {
-          const raw = Number(values[sourceOffset + column.source]);
+          const raw = values === null ? absentValue : Number(values[sourceOffset + column.source]);
           const fill = array.fill_value;
           pixels[targetOffset + column.target] = !Number.isFinite(raw) ||
             (typeof fill === "number" && raw === fill) ? MISSING_VALUE :

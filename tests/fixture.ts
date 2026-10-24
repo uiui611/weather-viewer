@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 export function startFixture({ forecastMesh = false } = {}) {
   const objects = new Map<string, Uint8Array | (() => Uint8Array)>();
   const requests: string[] = [];
+  const failures = new Map<string, { status: number; code: string } | "disconnect">();
   const put = (key: string, value: unknown) => objects.set(key, new TextEncoder().encode(JSON.stringify(value)));
   const variables = Object.keys(VARIABLE_PRESENTATION);
   const cycles = ["2026100500", "2026100418"];
@@ -70,6 +71,14 @@ export function startFixture({ forecastMesh = false } = {}) {
     const url = new URL(request.url);
     const key = decodeURIComponent(url.pathname.replace(/^\/weather\/?/, ""));
     requests.push(`${key}?${url.searchParams}`);
+    const failure = failures.get(key);
+    if (failure === "disconnect") {
+      server.stop(true);
+      return new Response("Disconnected", { status: 503 });
+    }
+    if (failure) return new Response(`<Error><Code>${failure.code}</Code><Message>${failure.code}</Message></Error>`, {
+      status: failure.status, headers: { "Content-Type": "application/xml" },
+    });
     if (url.searchParams.has("list-type")) {
       const prefix = url.searchParams.get("prefix") ?? "";
       const contents = [...objects].filter(([key]) => key.startsWith(prefix)).map(([key, bytes]) =>
@@ -83,7 +92,7 @@ export function startFixture({ forecastMesh = false } = {}) {
       { status: 404, headers: { "Content-Type": "application/xml" } },
     );
   } });
-  return { server, requests, objects };
+  return { server, requests, objects, failures };
 }
 
 export async function startApp(s3Endpoint: string, basePath = "/weather-viewer") {
