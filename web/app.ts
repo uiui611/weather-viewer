@@ -11,10 +11,7 @@ import { ByteLruCache } from "./grid-cache";
 type DatasetInfo = CatalogDataset & { variables: VariableInfo[] };
 
 interface GridData {
-  dataset: Pick<DatasetInfo, "id" | "cycle" | "title">;
   variable: VariableInfo;
-  time: DatasetInfo["times"][number];
-  bounds: { south: number; west: number; north: number; east: number };
   lats: number[];
   lons: number[];
   values: Uint8Array;
@@ -388,8 +385,7 @@ async function loadGrid(): Promise<void> {
       const values = await decodeGridPng(response, source.metadata.grid.shape, variable.encoding);
       if (serial !== requestSerial) return;
       grid = {
-        dataset, variable, time: dataset.times[Number(timeRange.value)]!,
-        bounds: { south: 20, west: 118, north: 50, east: 155 },
+        variable,
         ...source.metadata.grid, values,
       };
       gridCache.set(url, grid);
